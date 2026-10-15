@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
   createClassSubjectController,
@@ -12,7 +13,7 @@ import {
 
 export const classSubjectsRouter = Router();
 
-classSubjectsRouter.use(authenticate, authorize('SUPER_ADMIN'));
+classSubjectsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 
 classSubjectsRouter.post('/', createClassSubjectController);
 classSubjectsRouter.get('/', listClassSubjectsController);

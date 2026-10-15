@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
   createEnrollmentController,
@@ -14,7 +15,7 @@ import {
 
 export const enrollmentsRouter = Router();
 
-enrollmentsRouter.use(authenticate, authorize('SUPER_ADMIN'));
+enrollmentsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 
 enrollmentsRouter.post('/bulk/preview', previewBulkEnrollmentController);
 enrollmentsRouter.post('/bulk', createBulkEnrollmentsController);

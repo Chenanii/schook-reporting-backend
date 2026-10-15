@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
   createAssessmentController,
@@ -25,6 +26,7 @@ export const assessmentsRouter = Router();
 
 assessmentsRouter.use(
   authenticate,
+  requireActiveSubscription,
   authorize(
     'SUPER_ADMIN',
     'SCHOOL_ADMIN',

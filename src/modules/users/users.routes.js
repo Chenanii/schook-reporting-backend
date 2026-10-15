@@ -2,6 +2,10 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import {
+  requireActiveSubscription,
+  requirePlanCapacity
+} from '../../middleware/require-active-subscription.js';
 
 import {
   createStaffController,
@@ -12,9 +16,9 @@ import {
 
 export const usersRouter = Router();
 
-usersRouter.use(authenticate, authorize('SUPER_ADMIN'));
+usersRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 
-usersRouter.post('/', createStaffController);
+usersRouter.post('/', requirePlanCapacity('staff'), createStaffController);
 usersRouter.get('/', listStaffController);
 usersRouter.get('/:id', getStaffController);
 usersRouter.patch('/:id', updateStaffController);

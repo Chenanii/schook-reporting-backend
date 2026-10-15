@@ -8,7 +8,7 @@ const resultSchema = z.object({
     'EXEMPT',
     'NOT_ENTERED',
   ]),
-  mark: z.coerce.number().min(0).max(100000).nullable().optional(),
+  mark: z.coerce.number().min(0).max(100).nullable().optional(),
   teacherComment: z.string().trim().max(1000).nullable().optional(),
 }).superRefine((result, ctx) => {
   if (result.status === 'PRESENT') {

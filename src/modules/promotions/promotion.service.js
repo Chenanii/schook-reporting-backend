@@ -10,6 +10,53 @@ function httpError(statusCode, code, message) {
 }
 
 const OUTCOMES = ['PROMOTE', 'REPEAT', 'GRADUATE'];
+const DEFAULT_POLICY = {
+  minimumAverage: 50,
+  passMark: 50,
+  minimumSubjectsPassed: 0,
+  requiredSubjectIds: [],
+};
+
+function evaluateStudent(enrollment, policy, isFinalLevel, requiredSubjectIds) {
+  const marks = enrollment.termResults
+    .filter((result) => requiredSubjectIds.includes(result.subjectId))
+    .map((result) => ({
+      subjectId: result.subjectId,
+      mark: result.finalMark == null ? null : Number(result.finalMark),
+    }));
+  const missingMarkSubjectIds = marks
+    .filter(({ mark }) => mark == null || !Number.isFinite(mark))
+    .map(({ subjectId }) => subjectId);
+  const validMarks = marks.filter(({ mark }) => mark != null && Number.isFinite(mark));
+  const passedSubjectIds = validMarks
+    .filter(({ mark }) => mark >= policy.passMark)
+    .map(({ subjectId }) => subjectId);
+  const average = validMarks.length
+    ? validMarks.reduce((sum, { mark }) => sum + mark, 0) / validMarks.length
+    : null;
+  const failedRequiredSubjectIds = policy.requiredSubjectIds.filter((id) => !passedSubjectIds.includes(id));
+  const meetsPolicy = average != null &&
+    average >= policy.minimumAverage &&
+    passedSubjectIds.length >= policy.minimumSubjectsPassed &&
+    failedRequiredSubjectIds.length === 0;
+  const eligible = missingMarkSubjectIds.length === 0;
+  return {
+    eligible,
+    missingMarkSubjectIds,
+    metrics: {
+      average: average == null ? null : Number(average.toFixed(2)),
+      subjectsPassed: passedSubjectIds.length,
+      subjectsAssessed: validMarks.length,
+      passedSubjectIds,
+      failedRequiredSubjectIds,
+    },
+    recommendedOutcome: eligible
+      ? meetsPolicy
+        ? isFinalLevel ? 'GRADUATE' : 'PROMOTE'
+        : 'REPEAT'
+      : null,
+  };
+}
 
 function auditSnapshot(enrollment) {
   return {
@@ -165,7 +212,7 @@ async function loadPromotionContext(
       student: true,
       termResults: {
         where: { status: 'PUBLISHED' },
-        select: { subjectId: true },
+        select: { subjectId: true, finalMark: true },
       },
     },
     orderBy: { studentId: 'asc' },
@@ -196,7 +243,28 @@ async function loadPromotionContext(
     (subject) => subject.subjectId,
   );
 
-  const eligibleEnrollments = enrollments.map((enrollment) => {
+  const savedPolicy = await db.promotionPolicy.findUnique({
+    where: { schoolId_classLevelId: { schoolId: sourceClassGroup.schoolId, classLevelId: sourceClassGroup.classLevelId } },
+  });
+  const policy = savedPolicy
+    ? {
+        id: savedPolicy.id,
+        minimumAverage: Number(savedPolicy.minimumAverage),
+        passMark: Number(savedPolicy.passMark),
+        minimumSubjectsPassed: savedPolicy.minimumSubjectsPassed,
+        requiredSubjectIds: savedPolicy.requiredSubjectIds,
+        isDefault: false,
+      }
+    : {
+        ...DEFAULT_POLICY,
+        minimumSubjectsPassed: Math.ceil(requiredSubjectIds.length / 2),
+        isDefault: true,
+      };
+  if (policy.requiredSubjectIds.some((id) => !requiredSubjectIds.includes(id))) {
+    throw httpError(409, 'INVALID_PROMOTION_POLICY', 'The promotion policy references subjects no longer assigned to this class level. Update the policy before processing promotions.');
+  }
+
+  const completeEnrollments = enrollments.map((enrollment) => {
     const publishedIds = new Set(
       enrollment.termResults.map((result) => result.subjectId),
     );
@@ -205,17 +273,29 @@ async function loadPromotionContext(
       (subjectId) => !publishedIds.has(subjectId),
     );
 
+    return { enrollment, missingSubjectIds };
+  });
+
+  const isFinalLevel = sourceClassGroup.classLevel.nextLevelId == null;
+  const eligibleEnrollments = completeEnrollments.map(
+    ({ enrollment, missingSubjectIds }) => {
+    const evaluation = evaluateStudent(enrollment, policy, isFinalLevel, requiredSubjectIds);
+    const eligible = evaluation.eligible && missingSubjectIds.length === 0;
     return {
       enrollment,
-      eligible: missingSubjectIds.length === 0,
+      ...evaluation,
+      eligible,
+      recommendedOutcome: eligible ? evaluation.recommendedOutcome : null,
       missingSubjectIds,
     };
-  });
+    },
+  );
 
   return {
     sourceTerm,
     destinationTerm,
     sourceClassGroup,
+    policy,
     eligibleEnrollments,
   };
 }
@@ -231,7 +311,7 @@ export async function previewPromotion({
     classGroupId,
   });
 
-  const { sourceClassGroup, eligibleEnrollments } = context;
+  const { sourceClassGroup, eligibleEnrollments, policy } = context;
   const isFinalLevel = sourceClassGroup.classLevel.nextLevelId == null;
 
   return {
@@ -249,23 +329,82 @@ export async function previewPromotion({
       academicYear: context.destinationTerm.academicYear.name,
     },
     finalClassLevel: isFinalLevel,
+    policy,
     totalStudents: eligibleEnrollments.length,
     eligibleCount: eligibleEnrollments.filter((item) => item.eligible).length,
     ineligibleCount: eligibleEnrollments.filter((item) => !item.eligible)
       .length,
     students: eligibleEnrollments.map(
-      ({ enrollment, eligible, missingSubjectIds }) => ({
+      ({ enrollment, eligible, missingSubjectIds, missingMarkSubjectIds, metrics, recommendedOutcome }) => ({
         enrollmentId: enrollment.id,
         studentId: enrollment.studentId,
         student: enrollment.student,
         eligible,
         missingSubjectIds,
-        allowedOutcomes: isFinalLevel
-          ? ['GRADUATE']
-          : ['PROMOTE', 'REPEAT'],
+        missingMarkSubjectIds,
+        metrics,
+        recommendedOutcome,
+        allowedOutcomes: isFinalLevel ? ['REPEAT', 'GRADUATE'] : ['PROMOTE', 'REPEAT'],
       }),
     ),
   };
+}
+
+export async function listPromotionPolicies() {
+  const classLevels = await prisma.classLevel.findMany({
+    orderBy: { levelOrder: 'asc' },
+    include: { subjects: { include: { subject: { select: { id: true, name: true, code: true } } } } },
+  });
+  const savedPolicies = await prisma.promotionPolicy.findMany();
+  const byLevel = new Map(savedPolicies.map((policy) => [policy.classLevelId, policy]));
+  return classLevels.map((level) => {
+    const saved = byLevel.get(level.id);
+    return {
+      classLevelId: level.id,
+      classLevelName: level.name,
+      subjects: level.subjects.map(({ subject }) => subject),
+      ...(saved ? {
+        id: saved.id,
+        minimumAverage: Number(saved.minimumAverage),
+        passMark: Number(saved.passMark),
+        minimumSubjectsPassed: saved.minimumSubjectsPassed,
+        requiredSubjectIds: saved.requiredSubjectIds,
+        isDefault: false,
+      } : {
+        ...DEFAULT_POLICY,
+        minimumSubjectsPassed: Math.ceil(level.subjects.length / 2),
+        isDefault: true,
+      }),
+    };
+  });
+}
+
+export async function savePromotionPolicy(classLevelId, data) {
+  const classLevel = await prisma.classLevel.findUnique({ where: { id: classLevelId } });
+  if (!classLevel) throw httpError(404, 'CLASS_LEVEL_NOT_FOUND', 'Class level not found.');
+  const subjects = await prisma.classSubject.findMany({
+    where: { classLevelId },
+    select: { subjectId: true },
+  });
+  const subjectIds = new Set(subjects.map(({ subjectId }) => subjectId));
+  if (data.minimumSubjectsPassed > subjects.length) {
+    throw httpError(400, 'INVALID_MINIMUM_SUBJECTS_PASSED', 'Minimum subjects passed cannot exceed the number assigned to this class level.');
+  }
+  if (data.requiredSubjectIds.some((id) => !subjectIds.has(id))) {
+    throw httpError(400, 'INVALID_REQUIRED_SUBJECT', 'Every required pass subject must be assigned to this class level.');
+  }
+  const existing = await prisma.promotionPolicy.findUnique({
+    where: { schoolId_classLevelId: { schoolId: classLevel.schoolId, classLevelId } },
+  });
+  const values = {
+    minimumAverage: data.minimumAverage,
+    passMark: data.passMark,
+    minimumSubjectsPassed: data.minimumSubjectsPassed,
+    requiredSubjectIds: data.requiredSubjectIds,
+  };
+  return existing
+    ? prisma.promotionPolicy.update({ where: { id: existing.id }, data: values })
+    : prisma.promotionPolicy.create({ data: { classLevelId, ...values } });
 }
 
 export async function approvePromotionBatch({
@@ -299,7 +438,7 @@ export async function approvePromotionBatch({
           classGroupId,
         });
 
-        const { sourceClassGroup, eligibleEnrollments } = context;
+        const { sourceClassGroup, eligibleEnrollments, policy } = context;
         const isFinalLevel = sourceClassGroup.classLevel.nextLevelId == null;
 
         if (!Array.isArray(decisions) || decisions.length === 0) {
@@ -310,12 +449,7 @@ export async function approvePromotionBatch({
           );
         }
 
-        const enrollmentMap = new Map(
-          eligibleEnrollments.map(({ enrollment, eligible }) => [
-            enrollment.id,
-            { enrollment, eligible },
-          ]),
-        );
+        const enrollmentMap = new Map(eligibleEnrollments.map((item) => [item.enrollment.id, item]));
 
         const decisionIds = decisions.map(
           (decision) => decision.enrollmentId,
@@ -362,7 +496,7 @@ export async function approvePromotionBatch({
             throw httpError(
               409,
               'STUDENT_RESULTS_INCOMPLETE',
-              `Enrollment ${decision.enrollmentId} has unpublished required subject results.`,
+              `Enrollment ${decision.enrollmentId} is missing a published subject result or final mark.`,
             );
           }
 
@@ -374,12 +508,16 @@ export async function approvePromotionBatch({
             );
           }
 
-          if (isFinalLevel && decision.outcome !== 'GRADUATE') {
+          if (isFinalLevel && decision.outcome === 'PROMOTE') {
             throw httpError(
               409,
-              'FINAL_LEVEL_REQUIRES_GRADUATION',
-              'Students in the final class level must be marked GRADUATE.',
+              'FINAL_LEVEL_CANNOT_PROMOTE',
+              'Students in the final class level can repeat or graduate, but cannot be promoted.',
             );
+          }
+
+          if (decision.outcome !== item.recommendedOutcome && !decision.overrideReason?.trim()) {
+            throw httpError(400, 'OVERRIDE_REASON_REQUIRED', `A reason is required to override the recommendation for enrollment ${decision.enrollmentId}.`);
           }
 
           if (!isFinalLevel && decision.outcome === 'GRADUATE') {
@@ -552,6 +690,7 @@ export async function approvePromotionBatch({
         }
 
         const decisionSnapshots = decisions.map((decision) => {
+          const evaluated = enrollmentMap.get(decision.enrollmentId);
           const created = createdEnrollments.find(
             (item) =>
               item.previousEnrollmentId === decision.enrollmentId,
@@ -560,6 +699,10 @@ export async function approvePromotionBatch({
           return {
             sourceEnrollmentId: decision.enrollmentId,
             outcome: decision.outcome,
+            recommendedOutcome: evaluated.recommendedOutcome,
+            metrics: evaluated.metrics,
+            policySnapshot: policy,
+            overrideReason: decision.overrideReason?.trim() || null,
             destinationClassGroupId:
               decision.destinationClassGroupId ?? null,
             destinationEnrollmentId: created?.enrollment.id ?? null,

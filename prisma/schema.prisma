@@ -69,6 +69,104 @@ enum ReportStatus {
   PUBLISHED
 }
 
+enum SchoolStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+  PENDING_PAYMENT
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+model School {
+  id     String       @id @default(cuid())
+  name   String
+  slug   String       @unique
+  email  String?
+  status SchoolStatus @default(ACTIVE)
+
+  users                User[]
+  teachers             Teacher[]
+  teacherInvitations   TeacherInvitation[]
+  studentAccounts      StudentAccount[]
+  parents              Parent[]
+  parentStudents       ParentStudent[]
+  students             Student[]
+  academicYears        AcademicYear[]
+  terms                Term[]
+  gradeScales          GradeScale[]
+  gradeBoundaries      GradeBoundary[]
+  classLevels          ClassLevel[]
+  classGroups          ClassGroup[]
+  subjects             Subject[]
+  classSubjects        ClassSubject[]
+  teachingAssignments  TeachingAssignment[]
+  enrollments          Enrollment[]
+  assessments          Assessment[]
+  assessmentResults    AssessmentResult[]
+  termSubjectResults   TermSubjectResult[]
+  annualSubjectResults AnnualSubjectResult[]
+  annualResultTerms    AnnualResultTerm[]
+  auditLogs            AuditLog[]
+  promotionBatches     PromotionBatch[]
+  subscriptions        SchoolSubscription[]
+  promotionPolicies    PromotionPolicy[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SubscriptionPlan {
+  id            String               @id @default(cuid())
+  code          String               @unique
+  name          String
+  description   String?
+  interval      BillingInterval
+  priceMinor    Int
+  currency      String               @default("MWK")
+  trialDays     Int                  @default(14)
+  maxStudents   Int?
+  maxStaff      Int?
+  isActive      Boolean              @default(true)
+  subscriptions SchoolSubscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, priceMinor])
+}
+
+model SchoolSubscription {
+  id                 String             @id @default(cuid())
+  schoolId           String
+  planId             String
+  status             SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime?
+  trialEndsAt        DateTime?
+  canceledAt         DateTime?
+  notes              String?
+
+  school School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  plan   SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([schoolId, status, currentPeriodEnd])
+  @@index([planId, status])
+}
+
 // ============================================================
 // USERS AND ACCESS
 // ============================================================
@@ -81,6 +179,9 @@ model User {
   lastName     String
   role         UserRole     @default(TEACHER)
   status       RecordStatus @default(ACTIVE)
+  schoolId     String?
+
+  school School? @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   teacher        Teacher?
   studentAccount StudentAccount?
@@ -97,15 +198,19 @@ model User {
 
   @@index([role, status])
   @@index([lastName, firstName])
+  @@index([schoolId])
 }
 
 model Teacher {
   id          String  @id @default(cuid())
   firstName   String
   lastName    String
-  email       String  @unique
-  staffNumber String? @unique
+  email       String
+  staffNumber String?
   userId      String? @unique
+  schoolId    String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   user        User?                @relation(fields: [userId], references: [id], onDelete: Restrict)
   assignments TeachingAssignment[]
@@ -114,7 +219,10 @@ model Teacher {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([schoolId, email])
+  @@unique([schoolId, staffNumber])
   @@index([lastName, firstName])
+  @@index([schoolId])
 }
 
 model TeacherInvitation {
@@ -125,6 +233,9 @@ model TeacherInvitation {
   acceptedAt  DateTime?
   revokedAt   DateTime?
   createdById String?
+  schoolId    String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 
@@ -132,29 +243,40 @@ model TeacherInvitation {
 
   @@index([teacherId, createdAt])
   @@index([expiresAt])
+  @@index([schoolId])
 }
 
 model StudentAccount {
   id        String @id @default(cuid())
   userId    String @unique
   studentId String @unique
+  schoolId  String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
   student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([schoolId])
 }
 
 model Parent {
-  id     String @id @default(cuid())
-  userId String @unique
+  id       String @id @default(cuid())
+  userId   String @unique
+  schoolId String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Restrict)
   students ParentStudent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([schoolId])
 }
 
 model ParentStudent {
@@ -163,6 +285,9 @@ model ParentStudent {
   studentId    String
   relationship String?
   isPrimary    Boolean @default(false)
+  schoolId     String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   parent  Parent  @relation(fields: [parentId], references: [id], onDelete: Restrict)
   student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
@@ -172,6 +297,7 @@ model ParentStudent {
 
   @@unique([parentId, studentId])
   @@index([studentId])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -180,13 +306,16 @@ model ParentStudent {
 
 model Student {
   id              String       @id @default(cuid())
-  admissionNumber String       @unique
+  admissionNumber String
   firstName       String
   middleName      String?
   lastName        String
   dateOfBirth     DateTime?    @db.Date
   gender          String?
   status          RecordStatus @default(ACTIVE)
+  schoolId        String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   account       StudentAccount?
   parents       ParentStudent[]
@@ -196,8 +325,10 @@ model Student {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([schoolId, admissionNumber])
   @@index([lastName, firstName])
   @@index([status])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -206,11 +337,14 @@ model Student {
 
 model AcademicYear {
   id           String   @id @default(cuid())
-  name         String   @unique
+  name         String
   startDate    DateTime @db.Date
   endDate      DateTime @db.Date
   isCurrent    Boolean  @default(false)
   gradeScaleId String?
+  schoolId     String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   gradeScale GradeScale? @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
 
@@ -220,7 +354,9 @@ model AcademicYear {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([schoolId, name])
   @@index([isCurrent])
+  @@index([schoolId])
 }
 
 model Term {
@@ -232,6 +368,9 @@ model Term {
   endDate             DateTime   @db.Date
   annualWeightPercent Decimal?   @db.Decimal(5, 2)
   status              TermStatus @default(DRAFT)
+  schoolId            String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
 
@@ -248,18 +387,25 @@ model Term {
   @@unique([academicYearId, sequence])
   @@unique([academicYearId, name])
   @@index([status])
+  @@index([schoolId])
 }
 
 model GradeScale {
   id          String  @id @default(cuid())
-  name        String  @unique
+  name        String
   description String?
+  schoolId    String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   boundaries    GradeBoundary[]
   academicYears AcademicYear[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
 }
 
 model GradeBoundary {
@@ -268,12 +414,16 @@ model GradeBoundary {
   grade        String
   minPercent   Decimal @db.Decimal(5, 2)
   description  String?
+  schoolId     String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   gradeScale GradeScale @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
 
   @@unique([gradeScaleId, grade])
   @@unique([gradeScaleId, minPercent])
   @@index([gradeScaleId, minPercent])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -282,24 +432,35 @@ model GradeBoundary {
 
 model ClassLevel {
   id          String  @id @default(cuid())
-  name        String  @unique
-  levelOrder  Int     @unique
+  name        String
+  levelOrder  Int
   nextLevelId String?
+  schoolId    String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   nextLevel      ClassLevel?  @relation("ClassProgression", fields: [nextLevelId], references: [id], onDelete: SetNull)
   previousLevels ClassLevel[] @relation("ClassProgression")
 
-  groups   ClassGroup[]
-  subjects ClassSubject[]
+  groups            ClassGroup[]
+  subjects          ClassSubject[]
+  promotionPolicies PromotionPolicy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([schoolId, name])
+  @@unique([schoolId, levelOrder])
+  @@index([schoolId])
 }
 
 model ClassGroup {
   id           String @id @default(cuid())
   name         String
   classLevelId String
+  schoolId     String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   classLevel       ClassLevel           @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
   enrollments      Enrollment[]
@@ -311,13 +472,17 @@ model ClassGroup {
 
   @@unique([classLevelId, name])
   @@index([classLevelId])
+  @@index([schoolId])
 }
 
 model Subject {
-  id     String       @id @default(cuid())
-  code   String       @unique
-  name   String       @unique
-  status RecordStatus @default(ACTIVE)
+  id       String       @id @default(cuid())
+  code     String
+  name     String
+  status   RecordStatus @default(ACTIVE)
+  schoolId String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   classLinks    ClassSubject[]
   assessments   Assessment[]
@@ -327,13 +492,19 @@ model Subject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([schoolId, code])
+  @@unique([schoolId, name])
   @@index([status])
+  @@index([schoolId])
 }
 
 model ClassSubject {
   id           String @id @default(cuid())
   classLevelId String
   subjectId    String
+  schoolId     String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   classLevel ClassLevel @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
   subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
@@ -345,6 +516,7 @@ model ClassSubject {
 
   @@unique([classLevelId, subjectId])
   @@index([subjectId])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -357,6 +529,9 @@ model TeachingAssignment {
   classGroupId   String
   classSubjectId String
   termId         String
+  schoolId       String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   teacher      Teacher      @relation(fields: [teacherId], references: [id], onDelete: Restrict)
   classGroup   ClassGroup   @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
@@ -372,6 +547,7 @@ model TeachingAssignment {
   @@index([teacherId, termId])
   @@index([classGroupId, termId])
   @@index([classSubjectId, termId])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -385,6 +561,9 @@ model Enrollment {
   classGroupId         String
   status               EnrollmentStatus @default(ACTIVE)
   previousEnrollmentId String?          @unique
+  schoolId             String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   student    Student    @relation(fields: [studentId], references: [id], onDelete: Restrict)
   term       Term       @relation(fields: [termId], references: [id], onDelete: Restrict)
@@ -403,6 +582,7 @@ model Enrollment {
   @@index([classGroupId, termId, status])
   @@index([studentId, status])
   @@index([termId, status])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -419,6 +599,9 @@ model Assessment {
   subjectId            String
   teachingAssignmentId String
   status               AssessmentStatus @default(DRAFT)
+  schoolId             String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   term               Term               @relation(fields: [termId], references: [id], onDelete: Restrict)
   subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
@@ -431,6 +614,7 @@ model Assessment {
 
   @@index([termId, subjectId, status])
   @@index([teachingAssignmentId])
+  @@index([schoolId])
 }
 
 model AssessmentResult {
@@ -442,6 +626,9 @@ model AssessmentResult {
   teacherComment String?
   enteredById    String?
   enteredAt      DateTime?
+  schoolId       String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
@@ -453,6 +640,7 @@ model AssessmentResult {
   @@unique([assessmentId, enrollmentId])
   @@index([enrollmentId])
   @@index([enteredById])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -469,6 +657,9 @@ model TermSubjectResult {
   gradeDescription String?
   teacherComment   String?
   status           ReportStatus @default(DRAFT)
+  schoolId         String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   calculatedAt DateTime?
   finalizedAt  DateTime?
@@ -485,6 +676,7 @@ model TermSubjectResult {
   @@unique([enrollmentId, subjectId])
   @@index([subjectId, status])
   @@index([status])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -501,6 +693,9 @@ model AnnualSubjectResult {
   grade            String?
   gradeDescription String?
   status           ReportStatus @default(DRAFT)
+  schoolId         String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   calculatedAt DateTime?
   finalizedAt  DateTime?
@@ -518,6 +713,7 @@ model AnnualSubjectResult {
   @@unique([studentId, academicYearId, subjectId])
   @@index([academicYearId, subjectId, status])
   @@index([studentId, academicYearId])
+  @@index([schoolId])
 }
 
 // Connects annual results to their contributing term results.
@@ -525,11 +721,15 @@ model AnnualResultTerm {
   id                    String @id @default(cuid())
   annualSubjectResultId String
   termSubjectResultId   String @unique
+  schoolId              String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   annualSubjectResult AnnualSubjectResult @relation(fields: [annualSubjectResultId], references: [id], onDelete: Restrict)
   termSubjectResult   TermSubjectResult   @relation(fields: [termSubjectResultId], references: [id], onDelete: Restrict)
 
   @@index([annualSubjectResultId])
+  @@index([schoolId])
 }
 
 // ============================================================
@@ -546,6 +746,9 @@ model AuditLog {
   newValues  Json?
   ipAddress  String?
   userAgent  String?
+  schoolId   String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
 
@@ -553,6 +756,7 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
+  @@index([schoolId])
 }
 
 model PromotionBatch {
@@ -560,6 +764,9 @@ model PromotionBatch {
   sourceTermId      String
   destinationTermId String
   classGroupId      String
+  schoolId          String
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   status    String @default("APPROVED")
   decisions Json
@@ -579,4 +786,22 @@ model PromotionBatch {
   @@unique([sourceTermId, classGroupId])
   @@index([destinationTermId])
   @@index([approvedById, approvedAt])
+  @@index([schoolId])
+}
+
+model PromotionPolicy {
+  id                    String     @id @default(cuid())
+  schoolId              String
+  classLevelId          String
+  minimumAverage        Decimal    @default(50) @db.Decimal(5, 2)
+  passMark              Decimal    @default(50) @db.Decimal(5, 2)
+  minimumSubjectsPassed Int        @default(0)
+  requiredSubjectIds    String[]   @default([])
+  school                School     @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  classLevel            ClassLevel @relation(fields: [classLevelId], references: [id], onDelete: Cascade)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@unique([schoolId, classLevelId])
+  @@index([schoolId])
 }

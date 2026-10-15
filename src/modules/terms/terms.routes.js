@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
   createTermController,
@@ -13,7 +14,7 @@ import {
 
 export const termsRouter = Router();
 
-termsRouter.use(authenticate, authorize('SUPER_ADMIN'));
+termsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 
 termsRouter.post('/', createTermController);
 termsRouter.get('/', listTermsController);

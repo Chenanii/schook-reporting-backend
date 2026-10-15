@@ -2,6 +2,10 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import {
+  requireActiveSubscription,
+  requirePlanCapacity
+} from '../../middleware/require-active-subscription.js';
 
 import {
   createTeacherController,
@@ -21,10 +25,10 @@ teachersRouter.post(
   acceptTeacherInvitationController
 );
 
-// All management endpoints require an authenticated super administrator.
-teachersRouter.use(authenticate, authorize('SUPER_ADMIN'));
+// School administrators manage records inside their tenant; platform admins may scope via X-School-ID.
+teachersRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 
-teachersRouter.post('/', createTeacherController);
+teachersRouter.post('/', requirePlanCapacity('staff'), createTeacherController);
 teachersRouter.get('/', listTeachersController);
 teachersRouter.get('/:id', getTeacherByIdController);
 teachersRouter.patch('/:id', updateTeacherController);

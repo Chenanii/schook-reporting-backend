@@ -1,11 +1,14 @@
 import {
   previewPromotion,
   approvePromotionBatch,
+  listPromotionPolicies,
+  savePromotionPolicy,
 } from './promotion.service.js';
 
 import {
   previewPromotionSchema,
   approvePromotionSchema,
+  promotionPolicySchema,
 } from './promotion.validation.js';
 
 import {
@@ -35,6 +38,23 @@ export async function previewPromotionController(req, res) {
     message: 'Promotion preview generated successfully.',
     data,
   });
+}
+
+export async function listPromotionPoliciesController(req, res) {
+  const data = await listPromotionPolicies();
+  return res.status(200).json({ success: true, data });
+}
+
+export async function savePromotionPolicyController(req, res) {
+  const parsed = promotionPolicySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'The promotion policy details are invalid.', details: parsed.error.issues },
+    });
+  }
+  const data = await savePromotionPolicy(req.params.classLevelId, parsed.data);
+  return res.status(200).json({ success: true, message: 'Promotion policy saved.', data });
 }
 
 export async function approvePromotionController(req, res) {

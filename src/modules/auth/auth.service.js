@@ -17,7 +17,8 @@ function publicUser(user) {
     firstName: user.firstName,
     lastName: user.lastName,
     role: user.role,
-    status: user.status
+    status: user.status,
+    schoolId: user.schoolId ?? null
   };
 }
 

@@ -440,6 +440,7 @@ export async function acceptTeacherInvitation({ token, password }, req) {
       const claimed = await tx.teacherInvitation.updateMany({
         where: {
           id: invitation.id,
+          schoolId: invitation.schoolId,
           acceptedAt: null,
           revokedAt: null,
           expiresAt: { gt: now },
@@ -456,7 +457,7 @@ export async function acceptTeacherInvitation({ token, password }, req) {
       }
 
       const teacher = await tx.teacher.findUnique({
-        where: { id: invitation.teacherId },
+        where: { id: invitation.teacherId, schoolId: invitation.schoolId },
       });
 
       if (!teacher || teacher.userId) {
@@ -469,6 +470,7 @@ export async function acceptTeacherInvitation({ token, password }, req) {
 
       const user = await tx.user.create({
         data: {
+          schoolId: teacher.schoolId,
           email: teacher.email,
           firstName: teacher.firstName,
           lastName: teacher.lastName,
@@ -479,19 +481,22 @@ export async function acceptTeacherInvitation({ token, password }, req) {
       });
 
       await tx.teacher.update({
-        where: { id: teacher.id },
+        where: { id: teacher.id, schoolId: invitation.schoolId },
         data: { userId: user.id },
       });
 
       await tx.auditLog.create({
-        data: auditData(
+        data: {
+          ...auditData(
           user.id,
           'TEACHER_INVITATION_ACCEPTED',
           teacher.id,
           null,
           { email: teacher.email },
           req
-        ),
+          ),
+          schoolId: teacher.schoolId
+        },
       });
 
       return {

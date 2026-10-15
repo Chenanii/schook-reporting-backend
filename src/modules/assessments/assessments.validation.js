@@ -9,7 +9,7 @@ const assessmentTypes = [
 export const createAssessmentSchema = z.object({
   title: z.string().trim().min(2).max(150),
   assessmentType: z.enum(assessmentTypes),
-  maxMark: z.coerce.number().positive().max(100000),
+  maxMark: z.coerce.number().positive().max(100),
   weightPercent: z.coerce.number().min(0).max(100),
   termId: z.string().trim().min(1),
   teachingAssignmentId: z.string().trim().min(1),
@@ -18,7 +18,7 @@ export const createAssessmentSchema = z.object({
 export const updateAssessmentSchema = z.object({
   title: z.string().trim().min(2).max(150).optional(),
   assessmentType: z.enum(assessmentTypes).optional(),
-  maxMark: z.coerce.number().positive().max(100000).optional(),
+  maxMark: z.coerce.number().positive().max(100).optional(),
   weightPercent: z.coerce.number().min(0).max(100).optional(),
 }).refine(
   (data) => Object.keys(data).length > 0,

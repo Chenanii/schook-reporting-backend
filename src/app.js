@@ -22,6 +22,8 @@ import { assessmentsRouter } from './modules/assessments/assessments.routes.js';
 import { termResultsRouter } from './modules/term-results/term-results.routes.js';
 import { reportCardsRouter } from './modules/report-cards/report-cards.routes.js';
 import { promotionRouter } from './modules/promotions/promotion.routes.js';
+import { subscriptionsRouter } from './modules/subscriptions/subscriptions.routes.js';
+import { schoolsRouter } from './modules/schools/schools.routes.js';
 
 export const app = express();
 
@@ -55,6 +57,8 @@ app.use(`${env.API_PREFIX}/assessments`, assessmentsRouter);
 app.use(`${env.API_PREFIX}/term-results`, termResultsRouter);
 app.use(`${env.API_PREFIX}/report-cards`, reportCardsRouter);
 app.use(`${env.API_PREFIX}/promotions`, promotionRouter);
+app.use(`${env.API_PREFIX}/subscriptions`, subscriptionsRouter);
+app.use(`${env.API_PREFIX}/schools`, schoolsRouter);
 
 app.get('/', (req, res) => {
   res.json({

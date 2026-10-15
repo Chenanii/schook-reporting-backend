@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
   listTermSubjectResultsController,
@@ -10,7 +11,7 @@ import {
 
 export const termResultsRouter = Router();
 
-termResultsRouter.use(authenticate);
+termResultsRouter.use(authenticate, requireActiveSubscription);
 termResultsRouter.use(
   authorize(
     'SUPER_ADMIN',

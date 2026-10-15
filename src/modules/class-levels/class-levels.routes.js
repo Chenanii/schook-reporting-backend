@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
   createClassLevelController,
@@ -11,7 +12,7 @@ import {
 
 export const classLevelsRouter = Router();
 
-classLevelsRouter.use(authenticate, authorize('SUPER_ADMIN'));
+classLevelsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 
 classLevelsRouter.post('/', createClassLevelController);
 classLevelsRouter.get('/', listClassLevelsController);

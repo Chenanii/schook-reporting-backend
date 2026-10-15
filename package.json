@@ -14,7 +14,9 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "admin:create": "node scripts/create-admin.js"
+    "admin:create": "node scripts/create-admin.js",
+    "test": "node --test test",
+    "test:mail": "node scripts/test-mail.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
