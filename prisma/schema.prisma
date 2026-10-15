@@ -1,0 +1,582 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  HEADTEACHER
+  ACADEMIC_ADMIN
+  EXAMS_OFFICER
+  TEACHER
+  FORM_TUTOR
+  STUDENT
+  PARENT
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum TermStatus {
+  DRAFT
+  OPEN
+  MARKS_REVIEW
+  FINALIZED
+  PUBLISHED
+  CLOSED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  PROMOTED
+  REPEATING
+  TRANSFERRED
+  WITHDRAWN
+  GRADUATED
+}
+
+enum AssessmentStatus {
+  DRAFT
+  OPEN
+  SUBMITTED
+  APPROVED
+  LOCKED
+}
+
+enum ResultStatus {
+  PRESENT
+  ABSENT
+  EXEMPT
+  NOT_ENTERED
+}
+
+enum ReportStatus {
+  DRAFT
+  FINALIZED
+  PUBLISHED
+}
+
+// ============================================================
+// USERS AND ACCESS
+// ============================================================
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         UserRole     @default(TEACHER)
+  status       RecordStatus @default(ACTIVE)
+
+  teacher        Teacher?
+  studentAccount StudentAccount?
+  parent         Parent?
+
+  enteredResults AssessmentResult[] @relation("ResultEnteredBy")
+  auditLogs      AuditLog[]         @relation("AuditActor")
+
+  promotionBatchesCreated  PromotionBatch[] @relation("PromotionBatchCreatedBy")
+  promotionBatchesApproved PromotionBatch[] @relation("PromotionBatchApprovedBy")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role, status])
+  @@index([lastName, firstName])
+}
+
+model Teacher {
+  id          String  @id @default(cuid())
+  firstName   String
+  lastName    String
+  email       String  @unique
+  staffNumber String? @unique
+  userId      String? @unique
+
+  user        User?                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignments TeachingAssignment[]
+  invitations TeacherInvitation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastName, firstName])
+}
+
+model TeacherInvitation {
+  id          String    @id @default(cuid())
+  teacherId   String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdById String?
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([teacherId, createdAt])
+  @@index([expiresAt])
+}
+
+model StudentAccount {
+  id        String @id @default(cuid())
+  userId    String @unique
+  studentId String @unique
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Parent {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  students ParentStudent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ParentStudent {
+  id           String  @id @default(cuid())
+  parentId     String
+  studentId    String
+  relationship String?
+  isPrimary    Boolean @default(false)
+
+  parent  Parent  @relation(fields: [parentId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([parentId, studentId])
+  @@index([studentId])
+}
+
+// ============================================================
+// STUDENTS
+// ============================================================
+
+model Student {
+  id              String       @id @default(cuid())
+  admissionNumber String       @unique
+  firstName       String
+  middleName      String?
+  lastName        String
+  dateOfBirth     DateTime?    @db.Date
+  gender          String?
+  status          RecordStatus @default(ACTIVE)
+
+  account       StudentAccount?
+  parents       ParentStudent[]
+  enrollments   Enrollment[]
+  annualResults AnnualSubjectResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastName, firstName])
+  @@index([status])
+}
+
+// ============================================================
+// ACADEMIC YEARS, TERMS AND GRADING
+// ============================================================
+
+model AcademicYear {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  isCurrent    Boolean  @default(false)
+  gradeScaleId String?
+
+  gradeScale GradeScale? @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
+
+  terms         Term[]
+  annualResults AnnualSubjectResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isCurrent])
+}
+
+model Term {
+  id                  String     @id @default(cuid())
+  name                String
+  sequence            Int
+  academicYearId      String
+  startDate           DateTime   @db.Date
+  endDate             DateTime   @db.Date
+  annualWeightPercent Decimal?   @db.Decimal(5, 2)
+  status              TermStatus @default(DRAFT)
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+  enrollments Enrollment[]
+  assignments TeachingAssignment[]
+  assessments Assessment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  promotionBatchesFrom PromotionBatch[] @relation("PromotionBatchSourceTerm")
+  promotionBatchesTo   PromotionBatch[] @relation("PromotionBatchDestinationTerm")
+
+  @@unique([academicYearId, sequence])
+  @@unique([academicYearId, name])
+  @@index([status])
+}
+
+model GradeScale {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+
+  boundaries    GradeBoundary[]
+  academicYears AcademicYear[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GradeBoundary {
+  id           String  @id @default(cuid())
+  gradeScaleId String
+  grade        String
+  minPercent   Decimal @db.Decimal(5, 2)
+  description  String?
+
+  gradeScale GradeScale @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
+
+  @@unique([gradeScaleId, grade])
+  @@unique([gradeScaleId, minPercent])
+  @@index([gradeScaleId, minPercent])
+}
+
+// ============================================================
+// CLASSES AND SUBJECTS
+// ============================================================
+
+model ClassLevel {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  levelOrder  Int     @unique
+  nextLevelId String?
+
+  nextLevel      ClassLevel?  @relation("ClassProgression", fields: [nextLevelId], references: [id], onDelete: SetNull)
+  previousLevels ClassLevel[] @relation("ClassProgression")
+
+  groups   ClassGroup[]
+  subjects ClassSubject[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ClassGroup {
+  id           String @id @default(cuid())
+  name         String
+  classLevelId String
+
+  classLevel       ClassLevel           @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
+  enrollments      Enrollment[]
+  assignments      TeachingAssignment[]
+  promotionBatches PromotionBatch[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([classLevelId, name])
+  @@index([classLevelId])
+}
+
+model Subject {
+  id     String       @id @default(cuid())
+  code   String       @unique
+  name   String       @unique
+  status RecordStatus @default(ACTIVE)
+
+  classLinks    ClassSubject[]
+  assessments   Assessment[]
+  termResults   TermSubjectResult[]
+  annualResults AnnualSubjectResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model ClassSubject {
+  id           String @id @default(cuid())
+  classLevelId String
+  subjectId    String
+
+  classLevel ClassLevel @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
+  subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  assignments TeachingAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([classLevelId, subjectId])
+  @@index([subjectId])
+}
+
+// ============================================================
+// TEACHER ASSIGNMENTS
+// ============================================================
+
+model TeachingAssignment {
+  id             String @id @default(cuid())
+  teacherId      String
+  classGroupId   String
+  classSubjectId String
+  termId         String
+
+  teacher      Teacher      @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  classGroup   ClassGroup   @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  classSubject ClassSubject @relation(fields: [classSubjectId], references: [id], onDelete: Restrict)
+  term         Term         @relation(fields: [termId], references: [id], onDelete: Restrict)
+
+  assessments Assessment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teacherId, classGroupId, classSubjectId, termId])
+  @@index([teacherId, termId])
+  @@index([classGroupId, termId])
+  @@index([classSubjectId, termId])
+}
+
+// ============================================================
+// STUDENT ENROLMENTS AND PROGRESSION
+// ============================================================
+
+model Enrollment {
+  id                   String           @id @default(cuid())
+  studentId            String
+  termId               String
+  classGroupId         String
+  status               EnrollmentStatus @default(ACTIVE)
+  previousEnrollmentId String?          @unique
+
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  term       Term       @relation(fields: [termId], references: [id], onDelete: Restrict)
+  classGroup ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+
+  previousEnrollment Enrollment? @relation("EnrollmentProgression", fields: [previousEnrollmentId], references: [id], onDelete: Restrict)
+  nextEnrollment     Enrollment? @relation("EnrollmentProgression")
+
+  results     AssessmentResult[]
+  termResults TermSubjectResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, termId])
+  @@index([classGroupId, termId, status])
+  @@index([studentId, status])
+  @@index([termId, status])
+}
+
+// ============================================================
+// ASSESSMENTS AND MARK ENTRY
+// ============================================================
+
+model Assessment {
+  id                   String           @id @default(cuid())
+  title                String
+  assessmentType       String
+  maxMark              Decimal          @db.Decimal(7, 2)
+  weightPercent        Decimal          @db.Decimal(5, 2)
+  termId               String
+  subjectId            String
+  teachingAssignmentId String
+  status               AssessmentStatus @default(DRAFT)
+
+  term               Term               @relation(fields: [termId], references: [id], onDelete: Restrict)
+  subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  teachingAssignment TeachingAssignment @relation(fields: [teachingAssignmentId], references: [id], onDelete: Restrict)
+
+  results AssessmentResult[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([termId, subjectId, status])
+  @@index([teachingAssignmentId])
+}
+
+model AssessmentResult {
+  id             String       @id @default(cuid())
+  assessmentId   String
+  enrollmentId   String
+  mark           Decimal?     @db.Decimal(7, 2)
+  status         ResultStatus @default(NOT_ENTERED)
+  teacherComment String?
+  enteredById    String?
+  enteredAt      DateTime?
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  enteredBy  User?      @relation("ResultEnteredBy", fields: [enteredById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assessmentId, enrollmentId])
+  @@index([enrollmentId])
+  @@index([enteredById])
+}
+
+// ============================================================
+// TERM REPORT SUBJECT RESULTS
+// These store calculated/finalised subject results for a term.
+// ============================================================
+
+model TermSubjectResult {
+  id               String       @id @default(cuid())
+  enrollmentId     String
+  subjectId        String
+  finalMark        Decimal?     @db.Decimal(5, 2)
+  grade            String?
+  gradeDescription String?
+  teacherComment   String?
+  status           ReportStatus @default(DRAFT)
+
+  calculatedAt DateTime?
+  finalizedAt  DateTime?
+  publishedAt  DateTime?
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  annualSources AnnualResultTerm[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([enrollmentId, subjectId])
+  @@index([subjectId, status])
+  @@index([status])
+}
+
+// ============================================================
+// ANNUAL SUBJECT RESULTS
+// These aggregate the relevant term results for a student.
+// ============================================================
+
+model AnnualSubjectResult {
+  id               String       @id @default(cuid())
+  studentId        String
+  academicYearId   String
+  subjectId        String
+  finalMark        Decimal?     @db.Decimal(5, 2)
+  grade            String?
+  gradeDescription String?
+  status           ReportStatus @default(DRAFT)
+
+  calculatedAt DateTime?
+  finalizedAt  DateTime?
+  publishedAt  DateTime?
+
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  sourceTermResults AnnualResultTerm[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, academicYearId, subjectId])
+  @@index([academicYearId, subjectId, status])
+  @@index([studentId, academicYearId])
+}
+
+// Connects annual results to their contributing term results.
+model AnnualResultTerm {
+  id                    String @id @default(cuid())
+  annualSubjectResultId String
+  termSubjectResultId   String @unique
+
+  annualSubjectResult AnnualSubjectResult @relation(fields: [annualSubjectResultId], references: [id], onDelete: Restrict)
+  termSubjectResult   TermSubjectResult   @relation(fields: [termSubjectResultId], references: [id], onDelete: Restrict)
+
+  @@index([annualSubjectResultId])
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id         String  @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?
+  userAgent  String?
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model PromotionBatch {
+  id                String @id @default(cuid())
+  sourceTermId      String
+  destinationTermId String
+  classGroupId      String
+
+  status    String @default("APPROVED")
+  decisions Json
+
+  createdById  String
+  approvedById String
+  approvedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sourceTerm      Term       @relation("PromotionBatchSourceTerm", fields: [sourceTermId], references: [id], onDelete: Restrict)
+  destinationTerm Term       @relation("PromotionBatchDestinationTerm", fields: [destinationTermId], references: [id], onDelete: Restrict)
+  classGroup      ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  createdBy       User       @relation("PromotionBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy      User       @relation("PromotionBatchApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceTermId, classGroupId])
+  @@index([destinationTermId])
+  @@index([approvedById, approvedAt])
+}
