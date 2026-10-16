@@ -12,7 +12,7 @@ import {
 
 export const classLevelsRouter = Router();
 
-classLevelsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+classLevelsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
 
 classLevelsRouter.post('/', createClassLevelController);
 classLevelsRouter.get('/', listClassLevelsController);

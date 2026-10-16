@@ -31,12 +31,21 @@ const gender = z
 const studentStatus = z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']);
 
 export const createStudentSchema = z.object({
+  termId: z.string().trim().min(1, 'Academic term is required.'),
+  classLevelId: z.string().trim().min(1, 'Class level is required.'),
   firstName,
   middleName: middleName.optional(),
   lastName,
   dateOfBirth: dateOfBirth.nullable().optional(),
   gender: gender.nullable().optional(),
-  status: studentStatus.optional()
+  status: studentStatus.optional(),
+  parents: z.array(z.object({
+    firstName: z.string().trim().min(1).max(80),
+    lastName: z.string().trim().min(1).max(80),
+    phone: z.string().trim().min(5).max(30),
+    email: z.string().trim().email().transform((value) => value.toLowerCase()).optional().or(z.literal('')),
+    relationship: z.string().trim().max(40).optional()
+  }).strict()).min(1, 'Add at least one parent or guardian.').max(5)
 }).strict();
 
 export const updateStudentSchema = z.object({

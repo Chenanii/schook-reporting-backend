@@ -89,11 +89,16 @@ enum BillingInterval {
 }
 
 model School {
-  id     String       @id @default(cuid())
-  name   String
-  slug   String       @unique
-  email  String?
-  status SchoolStatus @default(ACTIVE)
+  id                       String       @id @default(cuid())
+  name                     String
+  slug                     String       @unique
+  email                    String?
+  address                  String?
+  phone                    String?
+  logoDataUrl              String?      @db.Text
+  classTeacherSignerName   String?
+  headteacherSignerName    String?
+  status                   SchoolStatus @default(ACTIVE)
 
   users                User[]
   teachers             Teacher[]
@@ -109,9 +114,11 @@ model School {
   classLevels          ClassLevel[]
   classGroups          ClassGroup[]
   subjects             Subject[]
+  subjectStreams       SubjectStream[]
   classSubjects        ClassSubject[]
   teachingAssignments  TeachingAssignment[]
   enrollments          Enrollment[]
+  enrollmentSubjectStreams EnrollmentSubjectStream[]
   assessments          Assessment[]
   assessmentResults    AssessmentResult[]
   termSubjectResults   TermSubjectResult[]
@@ -264,18 +271,24 @@ model StudentAccount {
 }
 
 model Parent {
-  id       String @id @default(cuid())
-  userId   String @unique
-  schoolId String
+  id        String  @id @default(cuid())
+  userId    String? @unique
+  firstName String?
+  lastName  String?
+  email     String?
+  phone     String?
+  schoolId  String
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
-  user     User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user     User?           @relation(fields: [userId], references: [id], onDelete: Restrict)
   students ParentStudent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([schoolId, email])
+  @@index([schoolId, phone])
   @@index([schoolId])
 }
 
@@ -341,12 +354,9 @@ model AcademicYear {
   startDate    DateTime @db.Date
   endDate      DateTime @db.Date
   isCurrent    Boolean  @default(false)
-  gradeScaleId String?
   schoolId     String
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-
-  gradeScale GradeScale? @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
 
   terms         Term[]
   annualResults AnnualSubjectResult[]
@@ -376,6 +386,7 @@ model Term {
 
   enrollments Enrollment[]
   assignments TeachingAssignment[]
+  subjectStreams SubjectStream[]
   assessments Assessment[]
 
   createdAt DateTime @default(now())
@@ -400,7 +411,7 @@ model GradeScale {
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   boundaries    GradeBoundary[]
-  academicYears AcademicYear[]
+  classLevels   ClassLevel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -436,15 +447,19 @@ model ClassLevel {
   name        String
   levelOrder  Int
   nextLevelId String?
+  gradeScaleId String?
   schoolId    String
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   nextLevel      ClassLevel?  @relation("ClassProgression", fields: [nextLevelId], references: [id], onDelete: SetNull)
   previousLevels ClassLevel[] @relation("ClassProgression")
+  gradeScale     GradeScale?  @relation(fields: [gradeScaleId], references: [id], onDelete: Restrict)
 
   groups            ClassGroup[]
+  enrollments       Enrollment[]
   subjects          ClassSubject[]
+  subjectStreams    SubjectStream[]
   promotionPolicies PromotionPolicy[]
 
   createdAt DateTime @default(now())
@@ -452,6 +467,7 @@ model ClassLevel {
 
   @@unique([schoolId, name])
   @@unique([schoolId, levelOrder])
+  @@index([gradeScaleId])
   @@index([schoolId])
 }
 
@@ -487,6 +503,7 @@ model Subject {
 
   classLinks    ClassSubject[]
   teachingAssignments TeachingAssignment[]
+  subjectStreams SubjectStream[]
   assessments   Assessment[]
   termResults   TermSubjectResult[]
   annualResults AnnualSubjectResult[]
@@ -504,6 +521,7 @@ model ClassSubject {
   id           String @id @default(cuid())
   classLevelId String
   subjectId    String
+  isRequired   Boolean @default(true)
   schoolId     String
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
@@ -521,6 +539,32 @@ model ClassSubject {
   @@index([schoolId])
 }
 
+model SubjectStream {
+  id           String       @id @default(cuid())
+  name         String
+  classLevelId String
+  subjectId    String
+  termId       String
+  schoolId     String
+  status       RecordStatus @default(ACTIVE)
+
+  school     School     @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  classLevel ClassLevel @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
+  subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  term       Term       @relation(fields: [termId], references: [id], onDelete: Restrict)
+
+  teachingAssignments TeachingAssignment[]
+  studentSelections EnrollmentSubjectStream[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([classLevelId, termId, subjectId, name])
+  @@index([classLevelId, termId])
+  @@index([subjectId, termId])
+  @@index([schoolId])
+}
+
 // ============================================================
 // TEACHER ASSIGNMENTS
 // ============================================================
@@ -528,18 +572,20 @@ model ClassSubject {
 model TeachingAssignment {
   id             String @id @default(cuid())
   teacherId      String
-  classGroupId   String
+  classGroupId   String?
   subjectId      String
   classSubjectId String?
+  subjectStreamId String?
   termId         String
   schoolId       String
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   teacher      Teacher      @relation(fields: [teacherId], references: [id], onDelete: Restrict)
-  classGroup   ClassGroup   @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  classGroup   ClassGroup?  @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
   subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
   classSubject ClassSubject? @relation(fields: [classSubjectId], references: [id], onDelete: Restrict)
+  subjectStream SubjectStream? @relation(fields: [subjectStreamId], references: [id], onDelete: Restrict)
   term         Term         @relation(fields: [termId], references: [id], onDelete: Restrict)
 
   assessments Assessment[]
@@ -547,11 +593,11 @@ model TeachingAssignment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([teacherId, classGroupId, subjectId, termId])
   @@index([teacherId, termId])
   @@index([classGroupId, termId])
   @@index([subjectId, termId])
   @@index([classSubjectId, termId])
+  @@index([subjectStreamId])
   @@index([schoolId])
 }
 
@@ -563,7 +609,8 @@ model Enrollment {
   id                   String           @id @default(cuid())
   studentId            String
   termId               String
-  classGroupId         String
+  classLevelId         String
+  classGroupId         String?
   status               EnrollmentStatus @default(ACTIVE)
   previousEnrollmentId String?          @unique
   schoolId             String
@@ -572,21 +619,44 @@ model Enrollment {
 
   student    Student    @relation(fields: [studentId], references: [id], onDelete: Restrict)
   term       Term       @relation(fields: [termId], references: [id], onDelete: Restrict)
-  classGroup ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  classLevel ClassLevel @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
+  classGroup ClassGroup? @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
 
   previousEnrollment Enrollment? @relation("EnrollmentProgression", fields: [previousEnrollmentId], references: [id], onDelete: Restrict)
   nextEnrollment     Enrollment? @relation("EnrollmentProgression")
 
   results     AssessmentResult[]
   termResults TermSubjectResult[]
+  subjectStreams EnrollmentSubjectStream[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([studentId, termId])
+  @@index([classLevelId, termId, status])
   @@index([classGroupId, termId, status])
   @@index([studentId, status])
   @@index([termId, status])
+  @@index([schoolId])
+}
+
+model EnrollmentSubjectStream {
+  id             String       @id @default(cuid())
+  enrollmentId   String
+  subjectStreamId String
+  status               RecordStatus @default(ACTIVE)
+  droppedAt            DateTime?
+  schoolId             String
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  enrollment   Enrollment   @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  subjectStream SubjectStream @relation(fields: [subjectStreamId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([enrollmentId, subjectStreamId])
+  @@index([subjectStreamId, status])
   @@index([schoolId])
 }
 
@@ -599,7 +669,6 @@ model Assessment {
   title                String
   assessmentType       String
   maxMark              Decimal          @db.Decimal(7, 2)
-  weightPercent        Decimal          @db.Decimal(5, 2)
   termId               String
   subjectId            String
   teachingAssignmentId String
@@ -751,9 +820,9 @@ model AuditLog {
   newValues  Json?
   ipAddress  String?
   userAgent  String?
-  schoolId   String
+  schoolId   String?
 
-  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  school School? @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
 

@@ -13,7 +13,7 @@ import {
 
 export const academicYearsRouter = Router();
 
-academicYearsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+academicYearsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
 
 academicYearsRouter.post('/', createAcademicYearController);
 academicYearsRouter.get('/', listAcademicYearsController);

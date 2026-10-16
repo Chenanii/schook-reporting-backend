@@ -10,7 +10,7 @@ import {
 export const schoolsRouter = Router();
 
 schoolsRouter.post('/signup', schoolSignupRateLimit, registerSchoolController);
-schoolsRouter.get('/current', authenticate, authorize('SCHOOL_ADMIN'), currentSchoolController);
-schoolsRouter.patch('/current', authenticate, authorize('SCHOOL_ADMIN'), updateCurrentSchoolController);
+schoolsRouter.get('/current', authenticate, authorize('SCHOOL_ADMIN', 'HEADTEACHER'), currentSchoolController);
+schoolsRouter.patch('/current', authenticate, authorize('SCHOOL_ADMIN', 'HEADTEACHER'), updateCurrentSchoolController);
 schoolsRouter.get('/', authenticate, authorize('SUPER_ADMIN'), listSchoolsController);
 schoolsRouter.patch('/:id/status', authenticate, authorize('SUPER_ADMIN'), updateSchoolStatusController);

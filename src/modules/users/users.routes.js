@@ -16,7 +16,7 @@ import {
 
 export const usersRouter = Router();
 
-usersRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+usersRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
 
 usersRouter.post('/', requirePlanCapacity('staff'), createStaffController);
 usersRouter.get('/', listStaffController);

@@ -287,7 +287,19 @@ export async function updateSchoolStatus(id, status, actorId) {
 export async function getSchoolProfile(id) {
   return prisma.school.findUnique({
     where: { id },
-    select: { id: true, name: true, slug: true, email: true, status: true, createdAt: true }
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      email: true,
+      address: true,
+      phone: true,
+      logoDataUrl: true,
+      classTeacherSignerName: true,
+      headteacherSignerName: true,
+      status: true,
+      createdAt: true,
+    }
   });
 }
 
@@ -303,10 +315,38 @@ export async function updateSchoolProfile(id, data, actorId) {
         action: 'SCHOOL_PROFILE_UPDATED',
         entityType: 'School',
         entityId: id,
-        oldValues: { name: school.name, slug: school.slug, email: school.email },
-        newValues: { name: updated.name, slug: updated.slug, email: updated.email }
+        oldValues: {
+          name: school.name,
+          slug: school.slug,
+          email: school.email,
+          address: school.address,
+          phone: school.phone,
+          hasLogo: Boolean(school.logoDataUrl),
+          classTeacherSignerName: school.classTeacherSignerName,
+          headteacherSignerName: school.headteacherSignerName,
+        },
+        newValues: {
+          name: updated.name,
+          slug: updated.slug,
+          email: updated.email,
+          address: updated.address,
+          phone: updated.phone,
+          hasLogo: Boolean(updated.logoDataUrl),
+          classTeacherSignerName: updated.classTeacherSignerName,
+          headteacherSignerName: updated.headteacherSignerName,
+        }
       }
     });
-    return { id: updated.id, name: updated.name, slug: updated.slug, email: updated.email };
+    return {
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      email: updated.email,
+      address: updated.address,
+      phone: updated.phone,
+      logoDataUrl: updated.logoDataUrl,
+      classTeacherSignerName: updated.classTeacherSignerName,
+      headteacherSignerName: updated.headteacherSignerName,
+    };
   });
 }

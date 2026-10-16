@@ -36,7 +36,16 @@ export const updateSchoolProfileSchema = z.object({
   name: z.string().trim().min(2).max(160).optional(),
   email: z.string().trim().email().transform((value) => value.toLowerCase()).nullable().optional(),
   slug: z.string().trim().toLowerCase().min(2).max(80)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  logoDataUrl: z.string()
+    .max(700_000)
+    .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)
+    .nullable()
+    .optional(),
+  classTeacherSignerName: z.string().trim().max(120).nullable().optional(),
+  headteacherSignerName: z.string().trim().max(120).nullable().optional()
 }).refine((data) => Object.keys(data).length > 0, {
   message: 'Provide at least one school field to update.'
 });

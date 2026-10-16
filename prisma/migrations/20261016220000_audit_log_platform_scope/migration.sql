@@ -1,0 +1,1 @@
+ALTER TABLE "AuditLog" ALTER COLUMN "schoolId" DROP NOT NULL;

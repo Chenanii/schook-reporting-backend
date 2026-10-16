@@ -25,6 +25,7 @@ function snapshot(enrollment) {
   return {
     studentId: enrollment.studentId,
     termId: enrollment.termId,
+    classLevelId: enrollment.classLevelId,
     classGroupId: enrollment.classGroupId,
     status: enrollment.status,
     previousEnrollmentId: enrollment.previousEnrollmentId
@@ -86,6 +87,7 @@ const enrollmentIncludes = {
       }
     }
   },
+  classLevel: { select: { id: true, name: true, levelOrder: true } },
   previousEnrollment: {
     select: {
       id: true,
@@ -106,20 +108,22 @@ function isEarlierTerm(previous, current) {
   return previous.term.sequence < current.sequence;
 }
 
-export async function createEnrollment(data, actorId, req) {
+export async function createEnrollment(data, actorId, req, schoolId) {
   try {
     return await prisma.$transaction(async (tx) => {
       const student = await tx.student.findUnique({
         where: { id: data.studentId },
         select: {
           id: true,
-          status: true
+          status: true,
+          schoolId: true
         }
       });
 
       if (!student) {
         throw httpError(404, 'STUDENT_NOT_FOUND', 'Student not found.');
       }
+      if (student.schoolId !== schoolId) throw httpError(404, 'STUDENT_NOT_FOUND', 'Student not found for this school.');
 
       if (student.status !== 'ACTIVE') {
         throw httpError(
@@ -129,8 +133,11 @@ export async function createEnrollment(data, actorId, req) {
         );
       }
 
-      const term = await tx.term.findUnique({
-        where: { id: data.termId },
+      const classLevel = await tx.classLevel.findFirst({ where: { id: data.classLevelId, schoolId }, select: { id: true } });
+      if (!classLevel) throw httpError(404, 'CLASS_LEVEL_NOT_FOUND', 'Class level not found for this school.');
+
+      const term = await tx.term.findFirst({
+        where: { id: data.termId, schoolId },
         include: {
           academicYear: {
             select: {
@@ -154,16 +161,19 @@ export async function createEnrollment(data, actorId, req) {
         );
       }
 
-      const classGroup = await tx.classGroup.findUnique({
-        where: { id: data.classGroupId },
+      const classGroup = data.classGroupId ? await tx.classGroup.findFirst({
+        where: { id: data.classGroupId, schoolId },
         select: {
           id: true,
           classLevelId: true
         }
-      });
+      }) : null;
 
-      if (!classGroup) {
+      if (data.classGroupId && !classGroup) {
         throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
+      }
+      if (classGroup && classGroup.classLevelId !== classLevel.id) {
+        throw httpError(400, 'CLASS_LEVEL_MISMATCH', 'The class group must belong to the selected class level.');
       }
 
       let previousEnrollmentId = null;
@@ -234,7 +244,9 @@ export async function createEnrollment(data, actorId, req) {
         data: {
           studentId: student.id,
           termId: term.id,
-          classGroupId: classGroup.id,
+          classLevelId: classLevel.id,
+          classGroupId: classGroup?.id ?? null,
+          schoolId,
           ...(previousEnrollmentId ? { previousEnrollmentId } : {})
         },
         include: enrollmentIncludes
@@ -398,7 +410,7 @@ export async function updateEnrollmentClassGroup(id, classGroupId, actorId, req)
       where: { id },
       include: {
         term: { select: { status: true } },
-        classGroup: { select: { classLevelId: true } },
+        classLevelId: true,
         _count: { select: { results: true } },
       },
     });
@@ -414,7 +426,7 @@ export async function updateEnrollmentClassGroup(id, classGroupId, actorId, req)
     if (existing.status !== 'ACTIVE' || !['DRAFT', 'OPEN'].includes(existing.term.status) || existing._count.results > 0) {
       throw httpError(409, 'ENROLLMENT_STREAM_LOCKED', 'Only active enrollments in an open term without assessment results can be moved to another stream.');
     }
-    if (existing.classGroup.classLevelId !== destination.classLevelId) {
+    if (existing.classLevelId !== destination.classLevelId) {
       throw httpError(400, 'CLASS_LEVEL_MISMATCH', 'A student can only be moved to another class group at the same class level.');
     }
     const updated = await tx.enrollment.update({
@@ -676,6 +688,7 @@ export async function createBulkEnrollments(data, actorId, req) {
           data: {
             studentId: candidate.studentId,
             termId: plan.targetTerm.id,
+            classLevelId: plan.targetClass.classLevelId,
             classGroupId: plan.targetClass.id,
             previousEnrollmentId: candidate.previousEnrollmentId
           },
@@ -849,6 +862,7 @@ export async function createSelectedBulkEnrollments(data, actorId, req) {
           data: {
             studentId: candidate.studentId,
             termId: plan.targetTerm.id,
+            classLevelId: plan.targetClass.classLevelId,
             classGroupId: plan.targetClass.id,
             ...(candidate.previousEnrollmentId ? { previousEnrollmentId: candidate.previousEnrollmentId } : {}),
           },

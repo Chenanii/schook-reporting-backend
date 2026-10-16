@@ -21,7 +21,7 @@ export const enrollmentsRouter = Router();
 enrollmentsRouter.use(authenticate, requireActiveSubscription);
 enrollmentsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'), listEnrollmentsController);
 
-enrollmentsRouter.use(authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+enrollmentsRouter.use(authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
 enrollmentsRouter.post('/bulk/preview', previewBulkEnrollmentController);
 enrollmentsRouter.post('/bulk', createBulkEnrollmentsController);
 enrollmentsRouter.post('/bulk/selected/preview', previewSelectedBulkEnrollmentController);

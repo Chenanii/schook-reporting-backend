@@ -39,8 +39,11 @@ export async function transitionAssessment(
     include: {
       teachingAssignment: {
         select: {
+          id: true,
           termId: true,
           classGroupId: true,
+          classSubjectId: true,
+          subjectStreamId: true,
         },
       },
     },
@@ -80,8 +83,11 @@ export async function transitionAssessment(
     const activeEnrollments = await prisma.enrollment.findMany({
       where: {
         termId: assessment.termId,
-        classGroupId: assessment.teachingAssignment.classGroupId,
+        ...(!assessment.teachingAssignment.subjectStreamId ? { classGroupId: assessment.teachingAssignment.classGroupId } : {}),
         status: 'ACTIVE',
+        ...(assessment.teachingAssignment.subjectStreamId ? {
+          subjectStreams: { some: { subjectStreamId: assessment.teachingAssignment.subjectStreamId, status: 'ACTIVE' } },
+        } : {}),
       },
       select: { id: true },
     });
@@ -137,7 +143,7 @@ export async function resetAssessment(assessmentId, actorId, req) {
     const assessment = await tx.assessment.findUnique({
       where: { id: assessmentId },
       include: {
-        teachingAssignment: { select: { termId: true, classGroupId: true } },
+        teachingAssignment: { select: { termId: true, classGroupId: true, subjectStreamId: true } },
       },
     });
 
@@ -159,7 +165,13 @@ export async function resetAssessment(assessmentId, actorId, req) {
 
     const resultScope = {
       subjectId: assessment.subjectId,
-      enrollment: { is: { termId: assessment.termId, classGroupId: assessment.teachingAssignment.classGroupId } },
+      enrollment: {
+        is: {
+          termId: assessment.termId,
+          ...(!assessment.teachingAssignment.subjectStreamId ? { classGroupId: assessment.teachingAssignment.classGroupId } : {}),
+          ...(assessment.teachingAssignment.subjectStreamId ? { subjectStreams: { some: { subjectStreamId: assessment.teachingAssignment.subjectStreamId, status: 'ACTIVE' } } } : {}),
+        },
+      },
     };
     const protectedResults = await tx.termSubjectResult.count({
       where: { ...resultScope, status: { in: ['FINALIZED', 'PUBLISHED'] } },

@@ -33,7 +33,7 @@ export async function createStudentController(req, res, next) {
       return validationError(res, parsed.error);
     }
 
-    const student = await createStudent(parsed.data, req.user.id, req);
+    const student = await createStudent(parsed.data, req.user.id, req, req.schoolId);
 
     return res.status(201).json({
       success: true,

@@ -19,8 +19,8 @@ export const studentsRouter = Router();
 
 studentsRouter.use(authenticate, requireActiveSubscription);
 
-studentsRouter.post('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), requirePlanCapacity('students'), createStudentController);
-studentsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'TEACHER'), listStudentsController);
-studentsRouter.get('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'TEACHER'), getStudentController);
-studentsRouter.patch('/:id/status', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), updateStudentStatusController);
-studentsRouter.patch('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), updateStudentController);
+studentsRouter.post('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), requirePlanCapacity('students'), createStudentController);
+studentsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'TEACHER'), listStudentsController);
+studentsRouter.get('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'TEACHER'), getStudentController);
+studentsRouter.patch('/:id/status', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), updateStudentStatusController);
+studentsRouter.patch('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), updateStudentController);

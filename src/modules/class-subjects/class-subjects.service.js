@@ -24,7 +24,8 @@ function auditData(actorId, action, entityId, oldValues, newValues, req) {
 function snapshot(link) {
   return {
     classLevelId: link.classLevelId,
-    subjectId: link.subjectId
+    subjectId: link.subjectId,
+    isRequired: link.isRequired
   };
 }
 
@@ -112,7 +113,8 @@ export async function createClassSubject(data, actorId, req) {
       const link = await tx.classSubject.create({
         data: {
           classLevelId: data.classLevelId,
-          subjectId: data.subjectId
+          subjectId: data.subjectId,
+          isRequired: data.isRequired
         },
         include: classSubjectInclude
       });
@@ -133,6 +135,24 @@ export async function createClassSubject(data, actorId, req) {
   } catch (error) {
     handleDatabaseError(error);
   }
+}
+
+export async function updateClassSubject(id, data, actorId, req) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.classSubject.findUnique({ where: { id } });
+    if (!existing) {
+      throw httpError(404, 'CLASS_SUBJECT_NOT_FOUND', 'Class subject link not found.');
+    }
+    const link = await tx.classSubject.update({
+      where: { id },
+      data,
+      include: classSubjectInclude
+    });
+    await tx.auditLog.create({
+      data: auditData(actorId, 'CLASS_SUBJECT_UPDATED', id, snapshot(existing), snapshot(link), req)
+    });
+    return link;
+  });
 }
 
 export async function listClassSubjects(filters) {

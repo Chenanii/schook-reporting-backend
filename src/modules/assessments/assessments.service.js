@@ -64,6 +64,12 @@ const assessmentInclude = {
           name: true,
           status: true
         }
+      },
+      subjectStream: {
+        include: {
+          subject: { select: { id: true, name: true, code: true } },
+          classLevel: { select: { id: true, name: true, levelOrder: true } },
+        },
       }
     },
   },
@@ -77,8 +83,6 @@ const assessmentInclude = {
 const editableFields = [
   'title',
   'assessmentType',
-  'maxMark',
-  'weightPercent',
 ];
 
 function auditSnapshot(assessment) {
@@ -86,7 +90,6 @@ function auditSnapshot(assessment) {
     title: assessment.title,
     assessmentType: assessment.assessmentType,
     maxMark: assessment.maxMark.toString(),
-    weightPercent: assessment.weightPercent.toString(),
     termId: assessment.termId,
     subjectId: assessment.subjectId,
     teachingAssignmentId: assessment.teachingAssignmentId,
@@ -148,8 +151,7 @@ export async function createAssessment(data, actorId, req, teacherUserId = null)
       data: {
         title: data.title,
         assessmentType: data.assessmentType,
-        maxMark: data.maxMark,
-        weightPercent: data.assessmentType === 'FINAL_EXAM' ? 60 : data.weightPercent,
+        maxMark: 100,
         termId: data.termId,
         teachingAssignmentId: assignment.id,
         subjectId: assignment.subjectId,
@@ -242,21 +244,6 @@ export async function updateAssessment(id, data, actorId, req, teacherUserId = n
   const updateData = Object.fromEntries(
     Object.entries(data).filter(([key]) => editableFields.includes(key)),
   );
-  const nextType = data.assessmentType ?? existing.assessmentType;
-  if (nextType === 'FINAL_EXAM') {
-    updateData.weightPercent = 60;
-  } else {
-    const nextWeight = data.weightPercent ?? (
-      existing.assessmentType === 'FINAL_EXAM' && data.assessmentType ? 40 : Number(existing.weightPercent)
-    );
-    if (nextWeight > 40) {
-      throw httpError(400, 'ASSESSMENT_WEIGHT_INVALID', 'Coursework and mid-term assessment weights cannot exceed 40%.');
-    }
-    if (data.assessmentType && existing.assessmentType === 'FINAL_EXAM') {
-      updateData.weightPercent = nextWeight;
-    }
-  }
-
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.assessment.update({
       where: { id },

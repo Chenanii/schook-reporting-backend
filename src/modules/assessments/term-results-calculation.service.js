@@ -1,14 +1,12 @@
 import { prisma } from '../../lib/prisma.js';
+import { calculateFinalSubjectMark } from './assessment-scoring.js';
+import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
   return error;
-}
-
-function round2(value) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function resultSnapshot(result) {
@@ -19,6 +17,51 @@ function resultSnapshot(result) {
     grade: result.grade,
     status: result.status,
   };
+}
+
+function calculateCohort(assessments, enrollments, boundaries, subjectId) {
+  const unlocked = assessments.filter((assessment) => assessment.status !== 'LOCKED');
+  if (unlocked.length) throw httpError(409, 'ASSESSMENTS_NOT_LOCKED', 'Every assessment must be locked before term results can be calculated.');
+  const componentAssessments = assessments.filter((assessment) => ['COURSEWORK', 'MID_TERM_EXAM'].includes(assessment.assessmentType));
+  const finalExams = assessments.filter((assessment) => assessment.assessmentType === 'FINAL_EXAM');
+  const unsupported = assessments.filter((assessment) => !['COURSEWORK', 'MID_TERM_EXAM', 'FINAL_EXAM'].includes(assessment.assessmentType));
+  if (unsupported.length) throw httpError(409, 'UNSUPPORTED_ASSESSMENT_TYPE', 'One or more assessments have an unsupported assessment type.');
+  if (!componentAssessments.length) throw httpError(409, 'CONTINUOUS_ASSESSMENT_MISSING', 'At least one coursework or mid-term assessment is required.');
+  if (finalExams.length !== 1) throw httpError(409, 'FINAL_EXAM_CONFIGURATION_INVALID', 'Exactly one locked FINAL_EXAM assessment is required per subject stream and term.');
+
+  const finalExam = finalExams[0];
+  const assessmentResults = new Map(assessments.map((assessment) => [
+    assessment.id,
+    new Map(assessment.results.map((result) => [result.enrollmentId, result])),
+  ]));
+  const calculations = [];
+  for (const enrollment of enrollments) {
+    const studentResults = assessments.map((assessment) => ({ assessment, result: assessmentResults.get(assessment.id).get(enrollment.id) }));
+    const missingAssessments = studentResults.filter(({ result }) => !result || result.status === 'NOT_ENTERED').map(({ assessment }) => assessment.title);
+    if (missingAssessments.length) {
+      const student = enrollment.student;
+      const studentLabel = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ');
+      throw httpError(409, 'STUDENT_RESULTS_INCOMPLETE', `Missing assessment result${missingAssessments.length === 1 ? '' : 's'} for ${studentLabel || 'student'} (${student.admissionNumber}) in ${missingAssessments.join(', ')}. Record the student’s result for these assessments before calculating term results. No term results were saved.`);
+    }
+    const finalResult = assessmentResults.get(finalExam.id).get(enrollment.id);
+    if (finalResult.status === 'EXEMPT') throw httpError(409, 'FINAL_EXAM_EXEMPTION_REQUIRES_REVIEW', `Enrollment ${enrollment.id} is exempt from the final exam. Manual review is required.`);
+    const finalExamPercent = finalResult.status === 'ABSENT' ? 0 : (Number(finalResult.mark) / Number(finalExam.maxMark)) * 100;
+    const componentPercents = componentAssessments
+      .map((assessment) => ({
+        assessment,
+        result: assessmentResults.get(assessment.id).get(enrollment.id),
+      }))
+      .filter(({ result }) => result.status !== 'EXEMPT')
+      .map(({ assessment, result }) => result.status === 'ABSENT'
+        ? 0
+        : (Number(result.mark) / Number(assessment.maxMark)) * 100);
+    if (componentPercents.length === 0) throw httpError(409, 'CONTINUOUS_ASSESSMENT_NOT_CALCULABLE', `Enrollment ${enrollment.id} has no eligible coursework or mid-term marks.`);
+    const finalMark = calculateFinalSubjectMark(componentPercents, finalExamPercent);
+    const boundary = [...boundaries].reverse().find((item) => finalMark >= Number(item.minPercent));
+    if (!boundary) throw httpError(409, 'GRADE_BOUNDARY_NOT_FOUND', `No grade boundary matches the calculated mark ${finalMark}%.`);
+    calculations.push({ enrollmentId: enrollment.id, subjectId, finalMark: finalMark.toFixed(2), grade: boundary.grade, gradeDescription: boundary.description ?? null });
+  }
+  return calculations;
 }
 
 export async function calculateTermSubjectResults({
@@ -38,35 +81,21 @@ export async function calculateTermSubjectResults({
 
   const term = await prisma.term.findUnique({
     where: { id: termId },
-    include: {
-      academicYear: {
-        include: {
-          gradeScale: {
-            include: {
-              boundaries: {
-                orderBy: { minPercent: 'asc' },
-              },
-            },
-          },
-        },
-      },
-    },
+    select: { id: true },
   });
 
   if (!term) {
     throw httpError(404, 'TERM_NOT_FOUND', 'Term not found.');
   }
 
-  if (!term.academicYear.gradeScale) {
-    throw httpError(
-      409,
-      'GRADE_SCALE_NOT_CONFIGURED',
-      'Configure a grade scale for this academic year before calculating results.',
-    );
-  }
+  const classGroup = await prisma.classGroup.findUnique({
+    where: { id: classGroupId },
+    select: { id: true, classLevelId: true },
+  });
+  if (!classGroup) throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
 
-  const boundaries = term.academicYear.gradeScale.boundaries;
-
+  const gradeScale = await getGradeScaleForClassLevel(prisma, classGroup.classLevelId);
+  const boundaries = gradeScale.boundaries;
   if (boundaries.length === 0) {
     throw httpError(
       409,
@@ -75,234 +104,84 @@ export async function calculateTermSubjectResults({
     );
   }
 
-  const assessments = await prisma.assessment.findMany({
-    where: {
-      termId,
-      subjectId,
-      teachingAssignment: { classGroupId },
-    },
-    include: {
-      results: true,
-    },
-    orderBy: { title: 'asc' },
+  const classSubject = await prisma.classSubject.findUnique({
+      where: { classLevelId_subjectId: { classLevelId: classGroup.classLevelId, subjectId } },
+      select: { isRequired: true },
   });
+  const isRequired = classSubject?.isRequired === true;
 
-  if (assessments.length === 0) {
-    throw httpError(
-      404,
-      'ASSESSMENTS_NOT_FOUND',
-      'No assessments were found for this class, subject, and term.',
-    );
-  }
-
-  const unlocked = assessments.filter(
-    (assessment) => assessment.status !== 'LOCKED',
-  );
-
-  if (unlocked.length > 0) {
-    throw httpError(
-      409,
-      'ASSESSMENTS_NOT_LOCKED',
-      'Every assessment must be locked before term results can be calculated.',
-    );
-  }
-
-  const componentAssessments = assessments.filter(
-    (assessment) =>
-      ['COURSEWORK', 'MID_TERM_EXAM'].includes(assessment.assessmentType),
-  );
-
-  const finalExams = assessments.filter(
-    (assessment) => assessment.assessmentType === 'FINAL_EXAM',
-  );
-
-  const unsupported = assessments.filter(
-    (assessment) =>
-      !['COURSEWORK', 'MID_TERM_EXAM', 'FINAL_EXAM'].includes(
-        assessment.assessmentType,
-      ),
-  );
-
-  if (unsupported.length > 0) {
-    throw httpError(
-      409,
-      'UNSUPPORTED_ASSESSMENT_TYPE',
-      'One or more assessments have an unsupported assessment type.',
-    );
-  }
-
-  if (componentAssessments.length === 0) {
-    throw httpError(
-      409,
-      'CONTINUOUS_ASSESSMENT_MISSING',
-      'At least one coursework or mid-term assessment is required.',
-    );
-  }
-
-  if (finalExams.length !== 1) {
-    throw httpError(
-      409,
-      'FINAL_EXAM_CONFIGURATION_INVALID',
-      'Exactly one locked FINAL_EXAM assessment is required per class, subject, and term.',
-    );
-  }
-
-  const totalWeight = componentAssessments.reduce(
-    (sum, assessment) => sum + Number(assessment.weightPercent),
-    0,
-  );
-
-  if (Math.abs(totalWeight - 40) > 0.01) {
-    throw httpError(
-      409,
-      'CONTINUOUS_ASSESSMENT_WEIGHTS_INVALID',
-      `Coursework and mid-term assessment weights must total 40%. The final exam contributes the remaining 60%. Current total: ${round2(totalWeight)}%.`,
-    );
-  }
-
-  const finalExam = finalExams[0];
-
-  const enrollments = await prisma.enrollment.findMany({
-    where: {
-      termId,
-      classGroupId,
-      status: 'ACTIVE',
-    },
-    select: {
-      id: true,
-      student: {
-        select: { admissionNumber: true, firstName: true, middleName: true, lastName: true },
+  const streams = await prisma.subjectStream.findMany({
+      where: {
+        classLevelId: classGroup.classLevelId,
+        termId,
+        subjectId,
+        teachingAssignments: { some: { termId } },
+        ...(isRequired ? {} : {
+          studentSelections: {
+            some: { status: 'ACTIVE', enrollment: { is: { termId, classGroupId, status: 'ACTIVE' } } },
+          },
+        }),
       },
-    },
+      select: { id: true },
   });
+  const streamIds = streams.map(({ id }) => id);
 
-  if (enrollments.length === 0) {
+  const cohortKeys = streamIds;
+  if (!cohortKeys.length) {
+    throw httpError(404, 'ASSESSMENTS_NOT_FOUND', isRequired
+      ? 'No teaching assignment exists for this required subject in the selected term.'
+      : 'No active students are enrolled in a subject stream for this class, subject, and term.');
+  }
+  if (isRequired && cohortKeys.length > 1) {
     throw httpError(
       409,
-      'NO_ACTIVE_ENROLLMENTS',
-      'There are no active enrollments to calculate.',
-    );
-  }
-
-  const assessmentResults = new Map();
-
-  for (const assessment of assessments) {
-    assessmentResults.set(
-      assessment.id,
-      new Map(
-        assessment.results.map((result) => [
-          result.enrollmentId,
-          result,
-        ]),
-      ),
+      'REQUIRED_SUBJECT_MULTIPLE_STREAMS',
+      'A required subject must have one teaching stream per class level and term so every student is calculated exactly once.',
     );
   }
 
   const calculations = [];
-
-  for (const enrollment of enrollments) {
-    const studentResults = assessments.map((assessment) => ({
-      assessment,
-      result: assessmentResults.get(assessment.id).get(enrollment.id),
-    }));
-
-    const missingAssessments = studentResults
-      .filter(({ result }) => !result || result.status === 'NOT_ENTERED')
-      .map(({ assessment }) => assessment.title);
-
-    if (missingAssessments.length > 0) {
-      const student = enrollment.student;
-      const studentLabel = [student.firstName, student.middleName, student.lastName]
-        .filter(Boolean)
-        .join(' ');
-      throw httpError(
-        409,
-        'STUDENT_RESULTS_INCOMPLETE',
-        `Missing assessment result${missingAssessments.length === 1 ? '' : 's'} for ${studentLabel || 'student'} (${student.admissionNumber}) in ${missingAssessments.join(', ')}. Record the student’s result for these assessments before calculating term results. No term results were saved.`,
-      );
-    }
-
-    const finalResult = assessmentResults
-      .get(finalExam.id)
-      .get(enrollment.id);
-
-    if (finalResult.status === 'EXEMPT') {
-      throw httpError(
-        409,
-        'FINAL_EXAM_EXEMPTION_REQUIRES_REVIEW',
-        `Enrollment ${enrollment.id} is exempt from the final exam. Manual review is required.`,
-      );
-    }
-
-    const finalExamPercent =
-      finalResult.status === 'ABSENT'
-        ? 0
-        : (Number(finalResult.mark) / Number(finalExam.maxMark)) * 100;
-
-    const eligibleComponents = componentAssessments
-      .map((assessment) => {
-        const result = assessmentResults
-          .get(assessment.id)
-          .get(enrollment.id);
-
-        return {
-          assessment,
-          result,
-          weight: Number(assessment.weightPercent),
-        };
-      })
-      .filter(({ result }) => result.status !== 'EXEMPT');
-
-    const eligibleWeight = eligibleComponents.reduce(
-      (sum, item) => sum + item.weight,
-      0,
-    );
-
-    if (eligibleWeight <= 0) {
-      throw httpError(
-        409,
-        'CONTINUOUS_ASSESSMENT_NOT_CALCULABLE',
-        `Enrollment ${enrollment.id} has no eligible coursework or mid-term marks.`,
-      );
-    }
-
-    const continuousPercent = eligibleComponents.reduce(
-      (sum, { assessment, result, weight }) => {
-        const percent =
-          result.status === 'ABSENT'
-            ? 0
-            : (Number(result.mark) / Number(assessment.maxMark)) * 100;
-
-        return sum + percent * (weight / eligibleWeight);
+  for (const streamId of cohortKeys) {
+    const assessments = await prisma.assessment.findMany({
+      where: {
+        termId,
+        subjectId,
+        teachingAssignment: { subjectStreamId: streamId },
       },
-      0,
-    );
-
-    const finalMark = round2(
-      continuousPercent * 0.4 + finalExamPercent * 0.6,
-    );
-
-    // Result marks and promotion policies stay canonical percentages. Grade-scale
-    // thresholds are normalized to percentages when the scale is saved.
-    const boundary = [...boundaries]
-      .reverse()
-      .find((item) => finalMark >= Number(item.minPercent));
-
-    if (!boundary) {
-      throw httpError(
-        409,
-        'GRADE_BOUNDARY_NOT_FOUND',
-        `No grade boundary matches the calculated mark ${finalMark}%.`,
-      );
+      include: {
+        results: true,
+        teachingAssignment: { select: { id: true, classSubjectId: true, subjectStreamId: true } },
+      },
+      orderBy: { title: 'asc' },
+    });
+    if (!assessments.length) {
+        throw httpError(404, 'ASSESSMENTS_NOT_FOUND', `No assessments were found for subject section ${streamId} in this term.`);
     }
 
-    calculations.push({
-      enrollmentId: enrollment.id,
-      subjectId,
-      finalMark: finalMark.toFixed(2),
-      grade: boundary.grade,
-      gradeDescription: boundary.description ?? null,
+    const enrollments = await prisma.enrollment.findMany({
+      where: {
+        termId,
+        ...(isRequired ? { classLevelId: classGroup.classLevelId } : { classGroupId }),
+        status: 'ACTIVE',
+        ...(!isRequired ? {
+          subjectStreams: { some: { subjectStreamId: streamId, status: 'ACTIVE' } },
+        } : {}),
+      },
+      select: {
+        id: true,
+        classGroupId: true,
+        student: { select: { admissionNumber: true, firstName: true, middleName: true, lastName: true } },
+      },
     });
+    const scopedEnrollments = isRequired
+      ? enrollments.filter((enrollment) => enrollment.classGroupId === classGroupId)
+      : enrollments;
+    if (!scopedEnrollments.length) continue;
+    calculations.push(...calculateCohort(assessments, scopedEnrollments, boundaries, subjectId));
+  }
+
+  if (!calculations.length) {
+    throw httpError(409, 'NO_ACTIVE_ENROLLMENTS', 'There are no active students to calculate for this class, subject, and term.');
   }
 
   return prisma.$transaction(async (tx) => {

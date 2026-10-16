@@ -5,7 +5,12 @@ const idSchema = z.string().trim().min(1, 'ID is required.');
 
 export const createClassSubjectSchema = z.object({
   classLevelId: idSchema,
-  subjectId: idSchema
+  subjectId: idSchema,
+  isRequired: z.boolean().default(true)
+}).strict();
+
+export const updateClassSubjectSchema = z.object({
+  isRequired: z.boolean()
 }).strict();
 
 export const listClassSubjectsSchema = z.object({

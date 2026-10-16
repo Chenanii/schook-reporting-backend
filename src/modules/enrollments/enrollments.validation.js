@@ -21,7 +21,8 @@ const bulkEnrollmentFields = {
 export const createEnrollmentSchema = z.object({
   studentId: z.string().trim().min(1, 'Student is required.'),
   termId: z.string().trim().min(1, 'Academic term is required.'),
-  classGroupId: z.string().trim().min(1, 'Class group is required.'),
+  classLevelId: z.string().trim().min(1, 'Class level is required.'),
+  classGroupId: z.string().trim().min(1).optional(),
   previousEnrollmentId: z.string().trim().min(1).optional()
 }).strict();
 

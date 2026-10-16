@@ -643,10 +643,15 @@ export async function approvePromotionBatch({
           let newEnrollment = null;
 
           if (decision.outcome !== 'GRADUATE') {
+            const destinationGroup = await tx.classGroup.findUnique({
+              where: { id: decision.destinationClassGroupId },
+              select: { classLevelId: true },
+            });
             newEnrollment = await tx.enrollment.create({
               data: {
                 studentId: enrollment.studentId,
                 termId: destinationTermId,
+                classLevelId: destinationGroup.classLevelId,
                 classGroupId: decision.destinationClassGroupId,
                 status: 'ACTIVE',
                 previousEnrollmentId: enrollment.id,

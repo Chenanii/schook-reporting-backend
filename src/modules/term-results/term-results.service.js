@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -47,48 +48,49 @@ async function validateScope(db, { termId, classGroupId, subjectId }) {
     throw httpError(404, 'SUBJECT_NOT_FOUND', 'Subject not found.');
   }
 
-  const classSubjects = await db.classSubject.findMany({
-    where: {
-      subjectId,
-    },
-    select: { classLevelId: true },
+  const assignments = await db.teachingAssignment.findMany({
+    where: { termId, subjectId, subjectStream: { is: { classLevelId: classGroup.classLevelId } } },
+    select: { subjectStreamId: true },
   });
 
-  const matchingClassSubject = classSubjects.some(
-    (link) => link.classLevelId === classGroup.classLevelId,
-  );
-
-  if (classSubjects.length > 0 && !matchingClassSubject) {
+  const classLinks = await db.classSubject.findMany({ where: { subjectId }, select: { classLevelId: true, isRequired: true } });
+  if (classLinks.length > 0 && !classLinks.some((link) => link.classLevelId === classGroup.classLevelId)) {
     throw httpError(
       409,
       'SUBJECT_NOT_ASSIGNED_TO_CLASS',
       'This subject is linked to a different class level.',
     );
   }
+  const classSubject = classLinks.find((link) => link.classLevelId === classGroup.classLevelId);
 
-  if (classSubjects.length === 0) {
-    const assignment = await db.teachingAssignment.findFirst({
-      where: { termId, classGroupId, subjectId },
-      select: { id: true },
-    });
-    if (!assignment) {
-      throw httpError(
-        409,
-        'SUBJECT_NOT_ASSIGNED_TO_CLASS_GROUP',
-        'Assign this standalone subject to a teacher and class group for this term before managing its results.',
-      );
-    }
+  if (!assignments.length) {
+    throw httpError(
+      409,
+      'SUBJECT_NOT_ASSIGNED_TO_CLASS_GROUP',
+      'Create a teacher assignment and subject section for this class level and term before managing its results.',
+    );
   }
 
-  return { term, classGroup, subject };
+  return {
+    term,
+    classGroup,
+    subject,
+    isRequired: classSubject?.isRequired === true,
+    streamAssignmentIds: assignments.map(({ subjectStreamId }) => subjectStreamId),
+  };
 }
 
-async function getActiveEnrollments(db, { termId, classGroupId }) {
+async function getActiveEnrollments(db, { termId, classGroupId, isRequired, streamAssignmentIds }) {
   const enrollments = await db.enrollment.findMany({
     where: {
       termId,
       classGroupId,
       status: 'ACTIVE',
+      ...(!isRequired && streamAssignmentIds?.length ? {
+        subjectStreams: {
+          some: { subjectStreamId: { in: streamAssignmentIds }, status: 'ACTIVE' },
+        },
+      } : {}),
     },
     select: {
       id: true,
@@ -115,7 +117,7 @@ async function getActiveEnrollments(db, { termId, classGroupId }) {
   return enrollments;
 }
 
-async function getScopedResults(db, { termId, classGroupId, subjectId }) {
+async function getScopedResults(db, { termId, classGroupId, subjectId, isRequired, streamAssignmentIds }) {
   return db.termSubjectResult.findMany({
     where: {
       subjectId,
@@ -123,6 +125,11 @@ async function getScopedResults(db, { termId, classGroupId, subjectId }) {
         is: {
           termId,
           classGroupId,
+          ...(!isRequired && streamAssignmentIds?.length ? {
+            subjectStreams: {
+              some: { subjectStreamId: { in: streamAssignmentIds }, status: 'ACTIVE' },
+            },
+          } : {}),
           status: 'ACTIVE',
         },
       },
@@ -162,22 +169,23 @@ export async function listTermSubjectResults({
   classGroupId,
   subjectId,
 }) {
-  await validateScope(prisma, { termId, classGroupId, subjectId });
+  const scope = await validateScope(prisma, { termId, classGroupId, subjectId });
 
-  const term = await prisma.term.findUnique({
-    where: { id: termId },
-    select: { academicYear: { select: { gradeScale: { select: { maxScore: true } } } } },
-  });
+  const gradeScale = await getGradeScaleForClassLevel(prisma, scope.classGroup.classLevelId);
 
   const enrollments = await getActiveEnrollments(prisma, {
     termId,
     classGroupId,
+    isRequired: scope.isRequired,
+    streamAssignmentIds: scope.streamAssignmentIds,
   });
 
   const results = await getScopedResults(prisma, {
     termId,
     classGroupId,
     subjectId,
+    isRequired: scope.isRequired,
+    streamAssignmentIds: scope.streamAssignmentIds,
   });
 
   const resultEnrollmentIds = new Set(
@@ -185,7 +193,7 @@ export async function listTermSubjectResults({
   );
 
   return {
-    scoreOutOf: term?.academicYear?.gradeScale?.maxScore ?? 100,
+    scoreOutOf: gradeScale.maxScore,
     expectedCount: enrollments.length,
     resultCount: results.length,
     missingCount: enrollments.filter((enrollment) => !resultEnrollmentIds.has(enrollment.id)).length,
@@ -204,17 +212,21 @@ export async function finalizeTermSubjectResults({
   req,
 }) {
   return prisma.$transaction(async (tx) => {
-    await validateScope(tx, { termId, classGroupId, subjectId });
+    const scope = await validateScope(tx, { termId, classGroupId, subjectId });
 
     const enrollments = await getActiveEnrollments(tx, {
       termId,
       classGroupId,
+      isRequired: scope.isRequired,
+      streamAssignmentIds: scope.streamAssignmentIds,
     });
 
     const results = await getScopedResults(tx, {
       termId,
       classGroupId,
       subjectId,
+      isRequired: scope.isRequired,
+      streamAssignmentIds: scope.streamAssignmentIds,
     });
 
     const resultByEnrollment = new Map(
@@ -294,17 +306,21 @@ export async function publishTermSubjectResults({
   req,
 }) {
   return prisma.$transaction(async (tx) => {
-    await validateScope(tx, { termId, classGroupId, subjectId });
+    const scope = await validateScope(tx, { termId, classGroupId, subjectId });
 
     const enrollments = await getActiveEnrollments(tx, {
       termId,
       classGroupId,
+      isRequired: scope.isRequired,
+      streamAssignmentIds: scope.streamAssignmentIds,
     });
 
     const results = await getScopedResults(tx, {
       termId,
       classGroupId,
       subjectId,
+      isRequired: scope.isRequired,
+      streamAssignmentIds: scope.streamAssignmentIds,
     });
 
     const resultEnrollmentIds = new Set(

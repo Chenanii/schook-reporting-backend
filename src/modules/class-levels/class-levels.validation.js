@@ -16,7 +16,8 @@ export const createClassLevelSchema = z
   .object({
     name: classLevelName,
     levelOrder,
-    nextLevelId: z.string().trim().min(1).nullable().optional()
+    nextLevelId: z.string().trim().min(1).nullable().optional(),
+    gradeScaleId: z.string().trim().min(1).nullable().optional()
   })
   .strict();
 
@@ -24,7 +25,8 @@ export const updateClassLevelSchema = z
   .object({
     name: classLevelName.optional(),
     levelOrder: levelOrder.optional(),
-    nextLevelId: z.string().trim().min(1).nullable().optional()
+    nextLevelId: z.string().trim().min(1).nullable().optional(),
+    gradeScaleId: z.string().trim().min(1).nullable().optional()
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, {

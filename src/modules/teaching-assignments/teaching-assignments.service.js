@@ -27,6 +27,8 @@ function snapshot(assignment) {
     classGroupId: assignment.classGroupId,
     subjectId: assignment.subjectId,
     classSubjectId: assignment.classSubjectId,
+    subjectStreamId: assignment.subjectStreamId,
+    streamName: assignment.subjectStream?.name ?? null,
     termId: assignment.termId
   };
 }
@@ -55,6 +57,8 @@ const assignmentInclude = {
   teacher: {
     select: {
       id: true,
+      firstName: true,
+      lastName: true,
       staffNumber: true
     }
   },
@@ -96,6 +100,13 @@ const assignmentInclude = {
       status: true
     }
   },
+  subjectStream: {
+    include: {
+      subject: { select: { id: true, code: true, name: true } },
+      classLevel: { select: { id: true, name: true, levelOrder: true } },
+      term: { select: { id: true, name: true, sequence: true } }
+    }
+  },
   term: true,
   _count: {
     select: {
@@ -110,13 +121,13 @@ async function validateAssignmentReferences(tx, data) {
       where: { id: data.teacherId },
       select: { id: true }
     }),
-    tx.classGroup.findUnique({
+    data.classGroupId ? tx.classGroup.findUnique({
       where: { id: data.classGroupId },
       select: {
         id: true,
         classLevelId: true
       }
-    }),
+    }) : Promise.resolve(null),
     tx.subject.findUnique({
       where: { id: data.subjectId },
       select: {
@@ -135,12 +146,22 @@ async function validateAssignmentReferences(tx, data) {
     throw httpError(404, 'TEACHER_NOT_FOUND', 'Teacher not found.');
   }
 
-  if (!classGroup) {
+  if (data.classGroupId && !classGroup) {
     throw httpError(
       404,
       'CLASS_GROUP_NOT_FOUND',
       'Class group not found.'
     );
+  }
+
+  const classLevelId = data.classLevelId || classGroup?.classLevelId;
+  if (!classLevelId) {
+    throw httpError(400, 'CLASS_LEVEL_REQUIRED', 'A class level is required for a subject stream.');
+  }
+  const classLevel = await tx.classLevel.findUnique({ where: { id: classLevelId }, select: { id: true, schoolId: true } });
+  if (!classLevel) throw httpError(404, 'CLASS_LEVEL_NOT_FOUND', 'Class level not found.');
+  if (classGroup && classGroup.classLevelId !== classLevel.id) {
+    throw httpError(400, 'CLASS_LEVEL_MISMATCH', 'The selected class group does not belong to the chosen class level.');
   }
 
   if (!subject) {
@@ -156,7 +177,7 @@ async function validateAssignmentReferences(tx, data) {
   }
 
   const classSubject = subject.classLinks.find(
-    (link) => link.classLevelId === classGroup.classLevelId
+    (link) => link.classLevelId === classLevel.id
   );
 
   if (subject.classLinks.length > 0 && !classSubject) {
@@ -175,16 +196,81 @@ async function validateAssignmentReferences(tx, data) {
     );
   }
 
-  return { classSubjectId: classSubject?.id ?? null };
+  return { classSubjectId: classSubject?.id ?? null, classLevelId: classLevel.id };
+}
+
+async function ensureSubjectStream(tx, data, classSubjectId, streamName) {
+  const classLevel = await tx.classLevel.findUnique({ where: { id: data.classLevelId }, select: { schoolId: true } });
+  return tx.subjectStream.upsert({
+    where: { classLevelId_termId_subjectId_name: { classLevelId: data.classLevelId, termId: data.termId, subjectId: data.subjectId, name: streamName } },
+    create: { name: streamName, classLevelId: data.classLevelId, termId: data.termId, subjectId: data.subjectId, schoolId: classLevel.schoolId },
+    update: {}
+  });
+}
+
+async function ensureRequiredSubjectUsesSingleStream(tx, {
+  classSubjectId,
+  subjectId,
+  termId,
+  exceptAssignmentId = null,
+}) {
+  if (!classSubjectId) return;
+  const classSubject = await tx.classSubject.findUnique({
+    where: { id: classSubjectId },
+    select: { isRequired: true },
+  });
+  if (!classSubject?.isRequired) return;
+
+  const existing = await tx.teachingAssignment.findFirst({
+    where: {
+      classSubjectId,
+      subjectId,
+      termId,
+      ...(exceptAssignmentId ? { id: { not: exceptAssignmentId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    throw httpError(
+      409,
+      'REQUIRED_SUBJECT_MULTIPLE_STREAMS',
+      'A required subject can have only one teaching stream per class level and term.',
+    );
+  }
+}
+
+async function ensureStreamHasNoOtherTeacher(tx, subjectStreamId, teacherId, exceptAssignmentId = null) {
+  if (!subjectStreamId) return;
+  const existing = await tx.teachingAssignment.findFirst({
+    where: {
+      subjectStreamId,
+      ...(exceptAssignmentId ? { id: { not: exceptAssignmentId } } : {}),
+    },
+    select: { id: true, teacherId: true },
+  });
+  if (existing && existing.teacherId !== teacherId) {
+    throw httpError(409, 'SUBJECT_STREAM_ALREADY_ASSIGNED', 'This subject stream already has a teacher assigned. Edit its existing assignment to change the teacher.');
+  }
+  if (existing) {
+    throw httpError(409, 'SUBJECT_STREAM_ASSIGNMENT_ALREADY_EXISTS', 'This subject stream already has a teaching assignment. Edit that assignment instead of creating a duplicate.');
+  }
 }
 
 export async function createTeachingAssignment(data, actorId, req) {
   try {
     return await prisma.$transaction(async (tx) => {
-      const { classSubjectId } = await validateAssignmentReferences(tx, data);
+      const { classSubjectId, classLevelId } = await validateAssignmentReferences(tx, data);
+      await ensureRequiredSubjectUsesSingleStream(tx, {
+        classSubjectId,
+        subjectId: data.subjectId,
+        termId: data.termId,
+      });
+      const streamName = data.streamName?.trim().toLocaleUpperCase() || 'A';
+      const subjectStream = await ensureSubjectStream(tx, { ...data, classLevelId }, classSubjectId, streamName);
+      await ensureStreamHasNoOtherTeacher(tx, subjectStream?.id, data.teacherId);
 
       const assignment = await tx.teachingAssignment.create({
-        data: { ...data, classSubjectId },
+        data: { teacherId: data.teacherId, classGroupId: null, subjectId: data.subjectId, termId: data.termId, classSubjectId, subjectStreamId: subjectStream.id },
         include: assignmentInclude
       });
 
@@ -273,6 +359,7 @@ export async function updateTeachingAssignment(id, data, actorId, req) {
       const existing = await tx.teachingAssignment.findUnique({
         where: { id },
         include: {
+          subjectStream: true,
           _count: {
             select: { assessments: true }
           }
@@ -290,14 +377,18 @@ export async function updateTeachingAssignment(id, data, actorId, req) {
       const merged = {
         teacherId: data.teacherId ?? existing.teacherId,
         classGroupId: data.classGroupId ?? existing.classGroupId,
+        classLevelId: data.classLevelId ?? existing.subjectStream?.classLevelId ?? undefined,
         subjectId: data.subjectId ?? existing.subjectId,
         termId: data.termId ?? existing.termId
       };
+      const streamName = data.streamName?.trim().toLocaleUpperCase() || existing.subjectStream?.name || 'A';
 
       const changesStructure =
         merged.classGroupId !== existing.classGroupId ||
+        (merged.classLevelId && merged.classLevelId !== existing.subjectStream?.classLevelId) ||
         merged.subjectId !== existing.subjectId ||
-        merged.termId !== existing.termId;
+        merged.termId !== existing.termId ||
+        (existing.subjectStream && streamName !== existing.subjectStream.name);
 
       if (existing._count.assessments > 0 && changesStructure) {
         throw httpError(
@@ -307,11 +398,19 @@ export async function updateTeachingAssignment(id, data, actorId, req) {
         );
       }
 
-      const { classSubjectId } = await validateAssignmentReferences(tx, merged);
+      const { classSubjectId, classLevelId } = await validateAssignmentReferences(tx, merged);
+      await ensureRequiredSubjectUsesSingleStream(tx, {
+        classSubjectId,
+        subjectId: merged.subjectId,
+        termId: merged.termId,
+        exceptAssignmentId: id,
+      });
+      const subjectStream = await ensureSubjectStream(tx, { ...merged, classLevelId }, classSubjectId, streamName);
+      await ensureStreamHasNoOtherTeacher(tx, subjectStream?.id, merged.teacherId, id);
 
       const updated = await tx.teachingAssignment.update({
         where: { id },
-        data: { ...merged, classSubjectId },
+        data: { teacherId: merged.teacherId, classGroupId: null, subjectId: merged.subjectId, termId: merged.termId, classSubjectId, subjectStreamId: subjectStream.id },
         include: assignmentInclude
       });
 

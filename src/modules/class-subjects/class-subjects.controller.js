@@ -1,6 +1,7 @@
 
 import {
   createClassSubjectSchema,
+  updateClassSubjectSchema,
   listClassSubjectsSchema,
   classSubjectIdSchema
 } from './class-subjects.validation.js';
@@ -9,6 +10,7 @@ import {
   createClassSubject,
   listClassSubjects,
   getClassSubjectById,
+  updateClassSubject,
   deleteClassSubject
 } from './class-subjects.service.js';
 
@@ -78,6 +80,23 @@ export async function getClassSubjectController(req, res, next) {
 
     return res.status(200).json({
       success: true,
+      data: link
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateClassSubjectController(req, res, next) {
+  try {
+    const params = classSubjectIdSchema.safeParse(req.params);
+    const body = updateClassSubjectSchema.safeParse(req.body);
+    if (!params.success) return validationError(res, params.error);
+    if (!body.success) return validationError(res, body.error);
+    const link = await updateClassSubject(params.data.id, body.data, req.user.id, req);
+    return res.status(200).json({
+      success: true,
+      message: 'Class subject requirement updated successfully.',
       data: link
     });
   } catch (error) {

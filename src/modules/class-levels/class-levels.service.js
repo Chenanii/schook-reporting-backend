@@ -24,8 +24,20 @@ function snapshot(level) {
   return {
     name: level.name,
     levelOrder: level.levelOrder,
-    nextLevelId: level.nextLevelId
+    nextLevelId: level.nextLevelId,
+    gradeScaleId: level.gradeScaleId
   };
+}
+
+async function validateGradeScale(tx, gradeScaleId) {
+  if (gradeScaleId == null) return;
+  const scale = await tx.gradeScale.findFirst({
+    where: { id: gradeScaleId },
+    select: { id: true }
+  });
+  if (!scale) {
+    throw httpError(404, 'GRADE_SCALE_NOT_FOUND', 'The selected grade scale was not found for this school.');
+  }
 }
 
 async function validateNextLevel(tx, currentId, nextLevelId, currentOrder) {
@@ -124,14 +136,17 @@ export async function createClassLevel(data, actorId, req) {
           data.levelOrder
         );
       }
+      await validateGradeScale(tx, data.gradeScaleId);
 
       const level = await tx.classLevel.create({
         data: {
           name: data.name,
           levelOrder: data.levelOrder,
-          nextLevelId: data.nextLevelId ?? null
+          nextLevelId: data.nextLevelId ?? null,
+          gradeScaleId: data.gradeScaleId ?? null
         },
         include: {
+          gradeScale: { select: { id: true, name: true, maxScore: true } },
           nextLevel: {
             select: { id: true, name: true, levelOrder: true }
           },
@@ -184,6 +199,7 @@ export async function listClassLevels(filters) {
     prisma.classLevel.findMany({
       where,
       include: {
+        gradeScale: { select: { id: true, name: true, maxScore: true } },
         nextLevel: {
           select: { id: true, name: true, levelOrder: true }
         },
@@ -213,6 +229,7 @@ export async function getClassLevelById(id) {
   const level = await prisma.classLevel.findUnique({
     where: { id },
     include: {
+      gradeScale: { select: { id: true, name: true, maxScore: true } },
       nextLevel: {
         select: { id: true, name: true, levelOrder: true }
       },
@@ -269,6 +286,7 @@ export async function updateClassLevel(id, data, actorId, req) {
       if (nextLevelId) {
         await validateNextLevel(tx, id, nextLevelId, levelOrder);
       }
+      if (data.gradeScaleId !== undefined) await validateGradeScale(tx, data.gradeScaleId);
 
       const updated = await tx.classLevel.update({
         where: { id },
@@ -277,9 +295,13 @@ export async function updateClassLevel(id, data, actorId, req) {
           ...(data.levelOrder !== undefined ? { levelOrder: data.levelOrder } : {}),
           ...(data.nextLevelId !== undefined
             ? { nextLevelId: data.nextLevelId }
+            : {}),
+          ...(data.gradeScaleId !== undefined
+            ? { gradeScaleId: data.gradeScaleId }
             : {})
         },
         include: {
+          gradeScale: { select: { id: true, name: true, maxScore: true } },
           nextLevel: {
             select: { id: true, name: true, levelOrder: true }
           },

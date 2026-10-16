@@ -58,13 +58,24 @@ const studentIncludes = {
   }
 };
 
-export async function createStudent(data, actorId, req) {
+export async function createStudent(data, actorId, req, schoolId) {
   try {
     return await prisma.$transaction(async (tx) => {
+      const [term, classLevel] = await Promise.all([
+        tx.term.findFirst({ where: { id: data.termId, schoolId }, select: { id: true, status: true } }),
+        tx.classLevel.findFirst({ where: { id: data.classLevelId, schoolId }, select: { id: true } })
+      ]);
+      if (!term) throw httpError(404, 'TERM_NOT_FOUND', 'Academic term not found for this school.');
+      if (!['DRAFT', 'OPEN'].includes(term.status)) {
+        throw httpError(409, 'TERM_NOT_ACCEPTING_ENROLLMENTS', 'Enrolments can only be created for terms in DRAFT or OPEN status.');
+      }
+      if (!classLevel) throw httpError(404, 'CLASS_LEVEL_NOT_FOUND', 'Class level not found for this school.');
+
       const admissionNumber = `STU-${new Date().getFullYear()}-${randomUUID().toUpperCase()}`;
       const student = await tx.student.create({
         data: {
           admissionNumber,
+          schoolId,
           firstName: data.firstName,
           ...(data.middleName !== undefined
             ? { middleName: data.middleName }
@@ -83,6 +94,40 @@ export async function createStudent(data, actorId, req) {
         include: studentIncludes
       });
 
+      const enrollment = await tx.enrollment.create({
+        data: { studentId: student.id, termId: term.id, classLevelId: classLevel.id, schoolId },
+        select: { id: true, studentId: true, termId: true, classLevelId: true, classGroupId: true, status: true }
+      });
+
+      for (const [index, contact] of data.parents.entries()) {
+        const email = contact.email?.trim().toLowerCase() || null;
+        let parent = email
+          ? await tx.parent.upsert({
+              where: { schoolId_email: { schoolId, email } },
+              create: { schoolId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, email },
+              update: { firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone }
+            })
+          : await tx.parent.findFirst({
+              where: { schoolId, phone: contact.phone, firstName: contact.firstName, lastName: contact.lastName }
+            });
+        if (!parent) {
+          parent = await tx.parent.create({
+            data: { schoolId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, ...(email ? { email } : {}) }
+          });
+        }
+        await tx.parentStudent.upsert({
+          where: { parentId_studentId: { parentId: parent.id, studentId: student.id } },
+          create: {
+            parentId: parent.id,
+            studentId: student.id,
+            schoolId,
+            relationship: contact.relationship || null,
+            isPrimary: index === 0
+          },
+          update: { relationship: contact.relationship || null, isPrimary: index === 0 }
+        });
+      }
+
       await tx.auditLog.create({
         data: auditData(
           actorId,
@@ -94,7 +139,27 @@ export async function createStudent(data, actorId, req) {
         )
       });
 
-      return student;
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'ENROLLMENT_CREATED',
+          entityType: 'Enrollment',
+          entityId: enrollment.id,
+          oldValues: undefined,
+          newValues: { ...enrollment, classLevelId: classLevel.id },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')?.slice(0, 500)
+        }
+      });
+
+      return tx.student.findUnique({
+        where: { id: student.id },
+        include: {
+          ...studentIncludes,
+          enrollments: { select: { id: true, termId: true, classLevelId: true, classGroupId: true, status: true } },
+          parents: { include: { parent: true } }
+        }
+      });
     });
   } catch (error) {
     handleDatabaseError(error);
@@ -111,11 +176,10 @@ export async function listStudents(filters, teacherUserId = null) {
             ...(teacherUserId
               ? {
                   some: {
-                    classGroup: {
-                      assignments: {
-                        some: { teacher: { userId: teacherUserId } },
-                      },
-                    },
+                    OR: [
+                      { classGroup: { assignments: { some: { teacher: { userId: teacherUserId } } } } },
+                      { subjectStreams: { some: { status: 'ACTIVE', subjectStream: { teachingAssignments: { some: { teacher: { userId: teacherUserId } } } } } } }
+                    ]
                   },
                 }
               : {}),
@@ -186,11 +250,10 @@ export async function getStudentById(id, teacherUserId = null) {
     ? {
         enrollments: {
           some: {
-            classGroup: {
-              assignments: {
-                some: { teacher: { userId: teacherUserId } },
-              },
-            },
+            OR: [
+              { classGroup: { assignments: { some: { teacher: { userId: teacherUserId } } } } },
+              { subjectStreams: { some: { status: 'ACTIVE', subjectStream: { teachingAssignments: { some: { teacher: { userId: teacherUserId } } } } } } }
+            ]
           },
         },
       }
@@ -203,16 +266,16 @@ export async function getStudentById(id, teacherUserId = null) {
         ...(teacherUserId
           ? {
               where: {
-                classGroup: {
-                  assignments: {
-                    some: { teacher: { userId: teacherUserId } },
-                  },
-                },
+                OR: [
+                  { classGroup: { assignments: { some: { teacher: { userId: teacherUserId } } } } },
+                  { subjectStreams: { some: { status: 'ACTIVE', subjectStream: { teachingAssignments: { some: { teacher: { userId: teacherUserId } } } } } } }
+                ]
               },
             }
           : {}),
         orderBy: { createdAt: 'desc' },
         include: {
+          classLevel: { select: { id: true, name: true, levelOrder: true } },
           term: {
             select: {
               id: true,
@@ -247,6 +310,10 @@ export async function getStudentById(id, teacherUserId = null) {
           parent: {
             select: {
               id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
               user: {
                 select: {
                   id: true,

@@ -43,7 +43,8 @@ export async function createEnrollmentController(req, res, next) {
     const enrollment = await createEnrollment(
       parsed.data,
       req.user.id,
-      req
+      req,
+      req.schoolId
     );
 
     return res.status(201).json({

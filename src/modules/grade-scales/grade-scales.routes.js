@@ -6,6 +6,6 @@ import { createGradeScaleController, listGradeScalesController } from './grade-s
 
 export const gradeScalesRouter = Router();
 
-gradeScalesRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+gradeScalesRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
 gradeScalesRouter.get('/', listGradeScalesController);
 gradeScalesRouter.post('/', createGradeScaleController);

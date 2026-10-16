@@ -26,7 +26,7 @@ teachersRouter.post(
 );
 
 // School administrators manage records inside their tenant; platform admins may scope via X-School-ID.
-teachersRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+teachersRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
 
 teachersRouter.post('/', requirePlanCapacity('staff'), createTeacherController);
 teachersRouter.get('/', listTeachersController);

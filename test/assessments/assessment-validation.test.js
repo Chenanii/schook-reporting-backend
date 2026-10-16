@@ -13,36 +13,12 @@ import {
 const validAssessment = {
   title: 'Mid-term test',
   assessmentType: 'MID_TERM_EXAM',
-  maxMark: 100,
-  weightPercent: 0,
   termId: 'term-1',
   teachingAssignmentId: 'assignment-1',
 };
 
-test('accepts an assessment with maximum mark 100', () => {
+test('accepts an assessment without maximum mark or contribution inputs', () => {
   assert.equal(createAssessmentSchema.safeParse(validAssessment).success, true);
-});
-
-test('rejects an assessment maximum above 100', () => {
-  assert.equal(
-    createAssessmentSchema.safeParse({
-      ...validAssessment,
-      maxMark: 101,
-    }).success,
-    false,
-  );
-});
-
-test('rejects zero or negative assessment maximum marks', () => {
-  for (const maxMark of [0, -1]) {
-    assert.equal(
-      createAssessmentSchema.safeParse({
-        ...validAssessment,
-        maxMark,
-      }).success,
-      false,
-    );
-  }
 });
 
 test('rejects unsupported assessment types', () => {
@@ -55,12 +31,8 @@ test('rejects unsupported assessment types', () => {
   );
 });
 
-test('accepts updating an assessment maximum to 100', () => {
-  assert.equal(updateAssessmentSchema.safeParse({ maxMark: 100 }).success, true);
-});
-
-test('rejects updating an assessment maximum above 100', () => {
-  assert.equal(updateAssessmentSchema.safeParse({ maxMark: 101 }).success, false);
+test('accepts updating assessment details without weighting fields', () => {
+  assert.equal(updateAssessmentSchema.safeParse({ title: 'Updated test' }).success, true);
 });
 
 test('accepts a present student with mark 100', () => {
