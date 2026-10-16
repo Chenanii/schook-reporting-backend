@@ -27,6 +27,7 @@ import { subscriptionsRouter } from './modules/subscriptions/subscriptions.route
 import { schoolsRouter } from './modules/schools/schools.routes.js';
 import { adminAuditMiddleware } from './middleware/admin-audit.js';
 import { auditLogsRouter } from './modules/audit-logs/audit-logs.routes.js';
+import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 
 export const app = express();
 
@@ -65,6 +66,7 @@ app.use(`${env.API_PREFIX}/promotions`, promotionRouter);
 app.use(`${env.API_PREFIX}/subscriptions`, subscriptionsRouter);
 app.use(`${env.API_PREFIX}/schools`, schoolsRouter);
 app.use(`${env.API_PREFIX}/audit-logs`, auditLogsRouter);
+app.use(`${env.API_PREFIX}/notifications`, notificationsRouter);
 
 app.get('/', (req, res) => {
   res.json({

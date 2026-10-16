@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
+import { createNotifications, getStudentAndParentUserIds } from '../notifications/notifications.service.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -24,11 +25,11 @@ async function validateScope(db, { termId, classGroupId, subjectId }) {
   const [term, classGroup, subject] = await Promise.all([
     db.term.findUnique({
       where: { id: termId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, schoolId: true },
     }),
     db.classGroup.findUnique({
       where: { id: classGroupId },
-      select: { id: true, classLevelId: true },
+      select: { id: true, name: true, classLevelId: true },
     }),
     db.subject.findUnique({
       where: { id: subjectId },
@@ -381,6 +382,18 @@ export async function publishTermSubjectResults({
 
       published.push(updated);
     }
+
+    const userIds = await getStudentAndParentUserIds(tx, {
+      schoolId: scope.term.schoolId,
+      studentIds: results.map(({ enrollment }) => enrollment.studentId),
+    });
+    await createNotifications(tx, {
+      schoolId: scope.term.schoolId,
+      userIds,
+      type: 'TERM_RESULT_PUBLISHED',
+      title: 'Subject result published',
+      message: `${scope.subject.name} results for ${scope.term.name} are now available.`,
+    });
 
     return published;
   });

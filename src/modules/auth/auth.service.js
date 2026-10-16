@@ -19,14 +19,14 @@ function publicUser(user) {
     role: user.role,
     status: user.status,
     schoolId: user.schoolId ?? null,
-    school: user.school ? { id: user.school.id, name: user.school.name } : null
+    school: user.school ? { id: user.school.id, name: user.school.name, slug: user.school.slug } : null
   };
 }
 
 export async function login({ email, password }) {
   const user = await prisma.user.findUnique({
     where: { email },
-    include: { school: { select: { id: true, name: true } } }
+    include: { school: { select: { id: true, name: true, slug: true } } }
   });
 
   // Use the same error for an unknown email and a wrong password.
@@ -59,7 +59,7 @@ export async function login({ email, password }) {
 export async function getCurrentUser(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { school: { select: { id: true, name: true } } }
+    include: { school: { select: { id: true, name: true, slug: true } } }
   });
 
   if (!user || user.status !== 'ACTIVE') {

@@ -1,5 +1,9 @@
 import { prisma } from '../../lib/prisma.js';
 import { teacherAssessmentScope } from './assessment-access.js';
+import {
+  createNotifications,
+  notifyActiveStudentsAndParents,
+} from '../notifications/notifications.service.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -133,6 +137,36 @@ export async function transitionAssessment(
         userAgent: req.get('user-agent')?.slice(0, 500),
       },
     });
+
+    if (targetStatus === 'OPEN') {
+      await notifyActiveStudentsAndParents(tx, {
+        schoolId: assessment.schoolId,
+        termId: assessment.termId,
+        classGroupId: assessment.teachingAssignment.classGroupId,
+        subjectStreamId: assessment.teachingAssignment.subjectStreamId,
+        type: 'ASSESSMENT_OPENED',
+        title: 'New assessment available',
+        message: `${assessment.title} is now open for your class.`,
+        entityId: assessment.id,
+      });
+    } else if (targetStatus === 'SUBMITTED') {
+      const reviewers = await tx.user.findMany({
+        where: {
+          schoolId: assessment.schoolId,
+          status: 'ACTIVE',
+          role: { in: ['SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'] },
+        },
+        select: { id: true },
+      });
+      await createNotifications(tx, {
+        schoolId: assessment.schoolId,
+        userIds: reviewers.map(({ id }) => id),
+        type: 'ASSESSMENT_SUBMITTED',
+        title: 'Assessment ready for review',
+        message: `${assessment.title} has been submitted for review.`,
+        entityId: assessment.id,
+      });
+    }
 
     return updated;
   });

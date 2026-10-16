@@ -69,6 +69,12 @@ enum ReportStatus {
   PUBLISHED
 }
 
+enum NotificationType {
+  ASSESSMENT_OPENED
+  ASSESSMENT_SUBMITTED
+  TERM_RESULT_PUBLISHED
+}
+
 enum SchoolStatus {
   ACTIVE
   SUSPENDED
@@ -128,6 +134,7 @@ model School {
   promotionBatches     PromotionBatch[]
   subscriptions        SchoolSubscription[]
   promotionPolicies    PromotionPolicy[]
+  notifications        Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -199,6 +206,7 @@ model User {
 
   promotionBatchesCreated  PromotionBatch[] @relation("PromotionBatchCreatedBy")
   promotionBatchesApproved PromotionBatch[] @relation("PromotionBatchApprovedBy")
+  notifications             Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -878,4 +886,22 @@ model PromotionPolicy {
 
   @@unique([schoolId, classLevelId])
   @@index([schoolId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  schoolId  String
+  type      NotificationType
+  title     String
+  message   String           @db.VarChar(500)
+  entityId  String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([userId, schoolId, readAt, createdAt])
+  @@index([schoolId, createdAt])
 }
