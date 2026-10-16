@@ -394,6 +394,7 @@ model GradeScale {
   id          String  @id @default(cuid())
   name        String
   description String?
+  maxScore    Int     @default(100)
   schoolId    String
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)

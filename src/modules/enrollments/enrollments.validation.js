@@ -39,6 +39,10 @@ export const updateEnrollmentStatusSchema = z.object({
   status: enrollmentStatus
 }).strict();
 
+export const updateEnrollmentClassGroupSchema = z.object({
+  classGroupId: z.string().trim().min(1, 'Class group is required.'),
+}).strict();
+
 export const bulkEnrollmentPreviewSchema = z.object(
   bulkEnrollmentFields
 ).strict().refine(
@@ -48,6 +52,15 @@ export const bulkEnrollmentPreviewSchema = z.object(
     path: ['targetTermId']
   }
 );
+
+export const selectedBulkEnrollmentSchema = z.object({
+  targetTermId: z.string().trim().min(1, 'Destination term is required.'),
+  targetClassGroupId: z.string().trim().min(1, 'Destination class is required.'),
+  studentIds: z.array(z.string().trim().min(1)).min(1).max(500).refine(
+    (ids) => new Set(ids).size === ids.length,
+    { message: 'A student can only be selected once.' },
+  ),
+}).strict();
 
 export const bulkEnrollmentSchema = z.object({
   ...bulkEnrollmentFields,

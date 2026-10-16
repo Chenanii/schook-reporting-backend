@@ -49,6 +49,10 @@ async function ensureYearDatesContainTerms(tx, yearId, startDate, endDate) {
 export async function createAcademicYear(data, actorId, req) {
   try {
     return await prisma.$transaction(async (tx) => {
+      if (data.gradeScaleId) {
+        const gradeScale = await tx.gradeScale.findUnique({ where: { id: data.gradeScaleId }, select: { id: true } });
+        if (!gradeScale) throw httpError(404, 'GRADE_SCALE_NOT_FOUND', 'The selected grade scale was not found.');
+      }
       if (data.isCurrent) {
         await tx.academicYear.updateMany({
           where: { isCurrent: true },
@@ -61,10 +65,12 @@ export async function createAcademicYear(data, actorId, req) {
           name: data.name,
           startDate: toDate(data.startDate),
           endDate: toDate(data.endDate),
-          isCurrent: data.isCurrent
+          isCurrent: data.isCurrent,
+          ...(data.gradeScaleId !== undefined ? { gradeScaleId: data.gradeScaleId } : {})
         },
         include: {
-          terms: { orderBy: { sequence: 'asc' } }
+          terms: { orderBy: { sequence: 'asc' } },
+          gradeScale: { include: { boundaries: { orderBy: { minPercent: 'asc' } } } }
         }
       });
 
@@ -105,6 +111,7 @@ export async function listAcademicYears(filters) {
     prisma.academicYear.findMany({
       include: {
         terms: { orderBy: { sequence: 'asc' } },
+        gradeScale: { include: { boundaries: { orderBy: { minPercent: 'asc' } } } },
         _count: { select: { annualResults: true } }
       },
       orderBy: { startDate: 'desc' },
@@ -134,7 +141,8 @@ export async function getAcademicYearById(id) {
         include: {
           _count: { select: { enrollments: true, assignments: true, assessments: true } }
         }
-      }
+      },
+      gradeScale: { include: { boundaries: { orderBy: { minPercent: 'asc' } } } }
     }
   });
 
@@ -155,6 +163,22 @@ export async function updateAcademicYear(id, data, actorId, req) {
 
       if (!current) {
         throw httpError(404, 'ACADEMIC_YEAR_NOT_FOUND', 'Academic year not found.');
+      }
+
+      if (data.gradeScaleId !== undefined && data.gradeScaleId !== current.gradeScaleId) {
+        const termIds = current.terms.map((term) => term.id);
+        const calculatedResults = termIds.length
+          ? await tx.termSubjectResult.count({
+              where: { enrollment: { is: { termId: { in: termIds } } } },
+            })
+          : 0;
+        if (calculatedResults > 0) {
+          throw httpError(
+            409,
+            'ACADEMIC_YEAR_GRADE_SCALE_LOCKED',
+            'The grading scale cannot be changed after results have been calculated for this academic year.',
+          );
+        }
       }
 
       const startDate = data.startDate ?? current.startDate.toISOString().slice(0, 10);
@@ -190,16 +214,28 @@ export async function updateAcademicYear(id, data, actorId, req) {
         });
       }
 
+      if (data.gradeScaleId) {
+        const gradeScale = await tx.gradeScale.findUnique({
+          where: { id: data.gradeScaleId },
+          select: { id: true },
+        });
+        if (!gradeScale) {
+          throw httpError(404, 'GRADE_SCALE_NOT_FOUND', 'The selected grade scale was not found.');
+        }
+      }
+
       const updated = await tx.academicYear.update({
         where: { id },
         data: {
           ...(data.name !== undefined ? { name: data.name } : {}),
           ...(data.startDate !== undefined ? { startDate: toDate(data.startDate) } : {}),
           ...(data.endDate !== undefined ? { endDate: toDate(data.endDate) } : {}),
-          ...(data.isCurrent !== undefined ? { isCurrent: data.isCurrent } : {})
+          ...(data.isCurrent !== undefined ? { isCurrent: data.isCurrent } : {}),
+          ...(data.gradeScaleId !== undefined ? { gradeScaleId: data.gradeScaleId } : {})
         },
         include: {
-          terms: { orderBy: { sequence: 'asc' } }
+          terms: { orderBy: { sequence: 'asc' } },
+          gradeScale: { include: { boundaries: { orderBy: { minPercent: 'asc' } } } }
         }
       });
 
@@ -212,13 +248,15 @@ export async function updateAcademicYear(id, data, actorId, req) {
             name: current.name,
             startDate: current.startDate.toISOString().slice(0, 10),
             endDate: current.endDate.toISOString().slice(0, 10),
-            isCurrent: current.isCurrent
+            isCurrent: current.isCurrent,
+            gradeScaleId: current.gradeScaleId
           },
           {
             name: updated.name,
             startDate: updated.startDate.toISOString().slice(0, 10),
             endDate: updated.endDate.toISOString().slice(0, 10),
-            isCurrent: updated.isCurrent
+            isCurrent: updated.isCurrent,
+            gradeScaleId: updated.gradeScaleId
           },
           req
         )

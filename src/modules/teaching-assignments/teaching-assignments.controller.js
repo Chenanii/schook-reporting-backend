@@ -57,7 +57,10 @@ export async function listTeachingAssignmentsController(req, res, next) {
       return validationError(res, parsed.error);
     }
 
-    const result = await listTeachingAssignments(parsed.data);
+    const result = await listTeachingAssignments(
+      parsed.data,
+      req.user.role === 'TEACHER' ? req.user.id : null
+    );
 
     return res.status(200).json({
       success: true,

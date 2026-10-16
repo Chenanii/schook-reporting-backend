@@ -3,8 +3,10 @@ import {
   createEnrollmentSchema,
   listEnrollmentsSchema,
   updateEnrollmentStatusSchema,
+  updateEnrollmentClassGroupSchema,
   bulkEnrollmentPreviewSchema,
-  bulkEnrollmentSchema
+  bulkEnrollmentSchema,
+  selectedBulkEnrollmentSchema
 } from './enrollments.validation.js';
 
 import {
@@ -12,8 +14,11 @@ import {
   listEnrollments,
   getEnrollmentById,
   updateEnrollmentStatus,
+  updateEnrollmentClassGroup,
   previewBulkEnrollment,
-  createBulkEnrollments
+  createBulkEnrollments,
+  previewSelectedBulkEnrollment,
+  createSelectedBulkEnrollments
 } from './enrollments.service.js';
 
 function validationError(res, error) {
@@ -108,6 +113,21 @@ export async function updateEnrollmentStatusController(req, res, next) {
   }
 }
 
+export async function updateEnrollmentClassGroupController(req, res, next) {
+  try {
+    const parsed = updateEnrollmentClassGroupSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const enrollment = await updateEnrollmentClassGroup(req.params.id, parsed.data.classGroupId, req.user.id, req);
+    return res.status(200).json({
+      success: true,
+      message: 'Student stream updated successfully.',
+      data: enrollment,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function previewBulkEnrollmentController(req, res, next) {
   try {
     const parsed = bulkEnrollmentPreviewSchema.safeParse(req.body);
@@ -146,6 +166,28 @@ export async function createBulkEnrollmentsController(req, res, next) {
       success: true,
       ...result
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function previewSelectedBulkEnrollmentController(req, res, next) {
+  try {
+    const parsed = selectedBulkEnrollmentSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const preview = await previewSelectedBulkEnrollment(parsed.data);
+    return res.status(200).json({ success: true, message: 'Selected enrollment preview generated.', data: preview });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createSelectedBulkEnrollmentsController(req, res, next) {
+  try {
+    const parsed = selectedBulkEnrollmentSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const result = await createSelectedBulkEnrollments(parsed.data, req.user.id, req);
+    return res.status(201).json({ success: true, ...result });
   } catch (error) {
     next(error);
   }

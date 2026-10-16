@@ -56,6 +56,8 @@ The health check verifies both the API and database connection.
 - Graceful shutdown and database health check
 - School signup, school-scoped academic data, subscription plans, trials and subscription access checks
 
+Teachers can create assessments, enter results, and submit assessments for review for their own assigned classes and subjects. Assessment access is limited to the teacher's linked account; approval and locking remain with school administrators and academic reviewers.
+
 ## School subscriptions
 
 Apply outstanding migrations before starting the updated API:

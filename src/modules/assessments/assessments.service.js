@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { teacherAssessmentScope } from './assessment-access.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -93,9 +94,12 @@ function auditSnapshot(assessment) {
   };
 }
 
-export async function createAssessment(data, actorId, req) {
-  const assignment = await prisma.teachingAssignment.findUnique({
-    where: { id: data.teachingAssignmentId },
+export async function createAssessment(data, actorId, req, teacherUserId = null) {
+  const assignment = await prisma.teachingAssignment.findFirst({
+    where: {
+      id: data.teachingAssignmentId,
+      ...(teacherUserId ? { teacher: { userId: teacherUserId } } : {}),
+    },
     select: {
       id: true,
       termId: true,
@@ -145,7 +149,7 @@ export async function createAssessment(data, actorId, req) {
         title: data.title,
         assessmentType: data.assessmentType,
         maxMark: data.maxMark,
-        weightPercent: data.weightPercent,
+        weightPercent: data.assessmentType === 'FINAL_EXAM' ? 60 : data.weightPercent,
         termId: data.termId,
         teachingAssignmentId: assignment.id,
         subjectId: assignment.subjectId,
@@ -170,9 +174,10 @@ export async function createAssessment(data, actorId, req) {
   return assessment;
 }
 
-export async function listAssessments(filters = {}) {
+export async function listAssessments(filters = {}, teacherUserId = null) {
   return prisma.assessment.findMany({
     where: {
+      ...teacherAssessmentScope(teacherUserId),
       ...(filters.termId && { termId: filters.termId }),
       ...(filters.subjectId && { subjectId: filters.subjectId }),
       ...(filters.teachingAssignmentId && {
@@ -191,9 +196,9 @@ export async function listAssessments(filters = {}) {
   });
 }
 
-export async function getAssessmentById(id) {
-  const assessment = await prisma.assessment.findUnique({
-    where: { id },
+export async function getAssessmentById(id, teacherUserId = null) {
+  const assessment = await prisma.assessment.findFirst({
+    where: { id, ...teacherAssessmentScope(teacherUserId) },
     include: assessmentInclude,
   });
 
@@ -204,9 +209,9 @@ export async function getAssessmentById(id) {
   return assessment;
 }
 
-export async function updateAssessment(id, data, actorId, req) {
-  const existing = await prisma.assessment.findUnique({
-    where: { id },
+export async function updateAssessment(id, data, actorId, req, teacherUserId = null) {
+  const existing = await prisma.assessment.findFirst({
+    where: { id, ...teacherAssessmentScope(teacherUserId) },
     include: {
       _count: {
         select: { results: true },
@@ -237,6 +242,20 @@ export async function updateAssessment(id, data, actorId, req) {
   const updateData = Object.fromEntries(
     Object.entries(data).filter(([key]) => editableFields.includes(key)),
   );
+  const nextType = data.assessmentType ?? existing.assessmentType;
+  if (nextType === 'FINAL_EXAM') {
+    updateData.weightPercent = 60;
+  } else {
+    const nextWeight = data.weightPercent ?? (
+      existing.assessmentType === 'FINAL_EXAM' && data.assessmentType ? 40 : Number(existing.weightPercent)
+    );
+    if (nextWeight > 40) {
+      throw httpError(400, 'ASSESSMENT_WEIGHT_INVALID', 'Coursework and mid-term assessment weights cannot exceed 40%.');
+    }
+    if (data.assessmentType && existing.assessmentType === 'FINAL_EXAM') {
+      updateData.weightPercent = nextWeight;
+    }
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.assessment.update({

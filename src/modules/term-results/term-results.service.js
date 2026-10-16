@@ -164,6 +164,11 @@ export async function listTermSubjectResults({
 }) {
   await validateScope(prisma, { termId, classGroupId, subjectId });
 
+  const term = await prisma.term.findUnique({
+    where: { id: termId },
+    select: { academicYear: { select: { gradeScale: { select: { maxScore: true } } } } },
+  });
+
   const enrollments = await getActiveEnrollments(prisma, {
     termId,
     classGroupId,
@@ -180,6 +185,7 @@ export async function listTermSubjectResults({
   );
 
   return {
+    scoreOutOf: term?.academicYear?.gradeScale?.maxScore ?? 100,
     expectedCount: enrollments.length,
     resultCount: results.length,
     missingCount: enrollments.filter((enrollment) => !resultEnrollmentIds.has(enrollment.id)).length,

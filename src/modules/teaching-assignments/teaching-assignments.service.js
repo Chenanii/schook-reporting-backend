@@ -206,7 +206,7 @@ export async function createTeachingAssignment(data, actorId, req) {
   }
 }
 
-export async function listTeachingAssignments(filters) {
+export async function listTeachingAssignments(filters, teacherUserId = null) {
   const {
     page,
     limit,
@@ -217,6 +217,7 @@ export async function listTeachingAssignments(filters) {
   } = filters;
 
   const where = {
+    ...(teacherUserId ? { teacher: { userId: teacherUserId } } : {}),
     ...(teacherId ? { teacherId } : {}),
     ...(classGroupId ? { classGroupId } : {}),
     ...(subjectId ? { subjectId } : {}),

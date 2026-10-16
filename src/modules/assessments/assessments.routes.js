@@ -17,6 +17,7 @@ import {
 
 import {
   transitionAssessmentController,
+  resetAssessmentController,
 } from './assessment-lifecycle.controller.js';
 
 import {
@@ -34,6 +35,7 @@ assessmentsRouter.use(
     'HEADTEACHER',
     'ACADEMIC_ADMIN',
     'EXAMS_OFFICER',
+    'TEACHER',
   ),
 );
 
@@ -44,4 +46,19 @@ assessmentsRouter.patch('/:id', updateAssessmentController);
 assessmentsRouter.get('/:id/results', getAssessmentResultsController);
 assessmentsRouter.put('/:id/results', saveAssessmentResultsController);
 assessmentsRouter.post('/:id/transition', transitionAssessmentController);
-assessmentsRouter.post('/terms/:termId/results/calculate', calculateTermSubjectResultsController,);
+assessmentsRouter.post(
+  '/:id/reset',
+  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'),
+  resetAssessmentController,
+);
+assessmentsRouter.post(
+  '/terms/:termId/results/calculate',
+  authorize(
+    'SUPER_ADMIN',
+    'SCHOOL_ADMIN',
+    'HEADTEACHER',
+    'ACADEMIC_ADMIN',
+    'EXAMS_OFFICER',
+  ),
+  calculateTermSubjectResultsController,
+);

@@ -4,6 +4,7 @@ import { authorize } from '../../middleware/authorize.js';
 import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 
 import {
+  getClassGroupReportCardsController,
   getReportCardPreviewController,
 } from './report-cards.controller.js';
 
@@ -18,7 +19,13 @@ reportCardsRouter.use(
     'HEADTEACHER',
     'ACADEMIC_ADMIN',
     'EXAMS_OFFICER',
+    'TEACHER',
   ),
+);
+
+reportCardsRouter.get(
+  '/terms/:termId/class-groups/:classGroupId',
+  getClassGroupReportCardsController,
 );
 
 reportCardsRouter.get(

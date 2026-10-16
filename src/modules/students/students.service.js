@@ -101,10 +101,28 @@ export async function createStudent(data, actorId, req) {
   }
 }
 
-export async function listStudents(filters) {
-  const { page, limit, search, status } = filters;
+export async function listStudents(filters, teacherUserId = null) {
+  const { page, limit, search, status, excludeEnrolledTermId } = filters;
 
   const where = {
+    ...(teacherUserId || excludeEnrolledTermId
+      ? {
+          enrollments: {
+            ...(teacherUserId
+              ? {
+                  some: {
+                    classGroup: {
+                      assignments: {
+                        some: { teacher: { userId: teacherUserId } },
+                      },
+                    },
+                  },
+                }
+              : {}),
+            ...(excludeEnrolledTermId ? { none: { termId: excludeEnrolledTermId } } : {}),
+          },
+        }
+      : {}),
     ...(status ? { status } : {}),
     ...(search
       ? {
@@ -163,12 +181,36 @@ export async function listStudents(filters) {
   };
 }
 
-export async function getStudentById(id) {
-  const student = await prisma.student.findUnique({
-    where: { id },
+export async function getStudentById(id, teacherUserId = null) {
+  const teacherClassScope = teacherUserId
+    ? {
+        enrollments: {
+          some: {
+            classGroup: {
+              assignments: {
+                some: { teacher: { userId: teacherUserId } },
+              },
+            },
+          },
+        },
+      }
+    : {};
+  const student = await prisma.student.findFirst({
+    where: { id, ...teacherClassScope },
     include: {
       ...studentIncludes,
       enrollments: {
+        ...(teacherUserId
+          ? {
+              where: {
+                classGroup: {
+                  assignments: {
+                    some: { teacher: { userId: teacherUserId } },
+                  },
+                },
+              },
+            }
+          : {}),
         orderBy: { createdAt: 'desc' },
         include: {
           term: {
@@ -200,7 +242,7 @@ export async function getStudentById(id) {
           }
         }
       },
-      parents: {
+      ...(teacherUserId ? {} : { parents: {
         include: {
           parent: {
             select: {
@@ -216,7 +258,7 @@ export async function getStudentById(id) {
             }
           }
         }
-      }
+      } }),
     }
   });
 

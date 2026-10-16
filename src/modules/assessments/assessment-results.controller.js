@@ -5,7 +5,10 @@ import {
 } from './assessment-results.service.js';
 
 export async function getAssessmentResultsController(req, res) {
-  const results = await getAssessmentResultEntries(req.params.id);
+  const results = await getAssessmentResultEntries(
+    req.params.id,
+    req.user.role === 'TEACHER' ? req.user.id : null,
+  );
   return res.status(200).json({
     success: true,
     data: results,
@@ -32,6 +35,7 @@ export async function saveAssessmentResultsController(req, res) {
     parsed.data.results,
     req.user.id,
     req,
+    req.user.role === 'TEACHER' ? req.user.id : null,
   );
 
   return res.status(200).json({

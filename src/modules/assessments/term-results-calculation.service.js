@@ -152,11 +152,11 @@ export async function calculateTermSubjectResults({
     0,
   );
 
-  if (Math.abs(totalWeight - 100) > 0.01) {
+  if (Math.abs(totalWeight - 40) > 0.01) {
     throw httpError(
       409,
       'CONTINUOUS_ASSESSMENT_WEIGHTS_INVALID',
-      `Coursework and mid-term assessment weights must total 100%. Current total: ${round2(totalWeight)}%.`,
+      `Coursework and mid-term assessment weights must total 40%. The final exam contributes the remaining 60%. Current total: ${round2(totalWeight)}%.`,
     );
   }
 
@@ -168,7 +168,12 @@ export async function calculateTermSubjectResults({
       classGroupId,
       status: 'ACTIVE',
     },
-    select: { id: true },
+    select: {
+      id: true,
+      student: {
+        select: { admissionNumber: true, firstName: true, middleName: true, lastName: true },
+      },
+    },
   });
 
   if (enrollments.length === 0) {
@@ -201,16 +206,19 @@ export async function calculateTermSubjectResults({
       result: assessmentResults.get(assessment.id).get(enrollment.id),
     }));
 
-    const missing = studentResults.some(
-      ({ result }) =>
-        !result || result.status === 'NOT_ENTERED',
-    );
+    const missingAssessments = studentResults
+      .filter(({ result }) => !result || result.status === 'NOT_ENTERED')
+      .map(({ assessment }) => assessment.title);
 
-    if (missing) {
+    if (missingAssessments.length > 0) {
+      const student = enrollment.student;
+      const studentLabel = [student.firstName, student.middleName, student.lastName]
+        .filter(Boolean)
+        .join(' ');
       throw httpError(
         409,
         'STUDENT_RESULTS_INCOMPLETE',
-        `Enrollment ${enrollment.id} has missing assessment results. No term results were saved.`,
+        `Missing assessment result${missingAssessments.length === 1 ? '' : 's'} for ${studentLabel || 'student'} (${student.admissionNumber}) in ${missingAssessments.join(', ')}. Record the student’s result for these assessments before calculating term results. No term results were saved.`,
       );
     }
 
@@ -274,6 +282,8 @@ export async function calculateTermSubjectResults({
       continuousPercent * 0.4 + finalExamPercent * 0.6,
     );
 
+    // Result marks and promotion policies stay canonical percentages. Grade-scale
+    // thresholds are normalized to percentages when the scale is saved.
     const boundary = [...boundaries]
       .reverse()
       .find((item) => finalMark >= Number(item.minPercent));

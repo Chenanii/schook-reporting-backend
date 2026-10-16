@@ -16,12 +16,17 @@ export const teachingAssignmentsRouter = Router();
 
 teachingAssignmentsRouter.use(
   authenticate,
-  requireActiveSubscription,
-  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN')
+  requireActiveSubscription
 );
 
+teachingAssignmentsRouter.get(
+  '/',
+  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'TEACHER'),
+  listTeachingAssignmentsController
+);
+
+teachingAssignmentsRouter.use(authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 teachingAssignmentsRouter.post('/', createTeachingAssignmentController);
-teachingAssignmentsRouter.get('/', listTeachingAssignmentsController);
 teachingAssignmentsRouter.get('/:id', getTeachingAssignmentController);
 teachingAssignmentsRouter.patch('/:id', updateTeachingAssignmentController);
 teachingAssignmentsRouter.delete('/:id', deleteTeachingAssignmentController);

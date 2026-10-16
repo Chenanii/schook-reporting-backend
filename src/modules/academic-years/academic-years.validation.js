@@ -13,7 +13,8 @@ export const createAcademicYearSchema = z.object({
   name: z.string().trim().min(1).max(50),
   startDate: dateOnly,
   endDate: dateOnly,
-  isCurrent: z.boolean().default(false)
+  isCurrent: z.boolean().default(false),
+  gradeScaleId: z.string().trim().min(1).nullable().optional()
 }).refine(
   (data) => data.startDate < data.endDate,
   {
@@ -26,7 +27,8 @@ export const updateAcademicYearSchema = z.object({
   name: z.string().trim().min(1).max(50).optional(),
   startDate: dateOnly.optional(),
   endDate: dateOnly.optional(),
-  isCurrent: z.boolean().optional()
+  isCurrent: z.boolean().optional(),
+  gradeScaleId: z.string().trim().min(1).nullable().optional()
 }).refine(
   (data) => Object.keys(data).length > 0,
   { message: 'Provide at least one field to update.' }

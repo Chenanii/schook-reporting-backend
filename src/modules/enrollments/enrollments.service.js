@@ -44,6 +44,7 @@ function handleDatabaseError(error) {
 }
 
 const enrollmentIncludes = {
+  _count: { select: { results: true } },
   student: {
     select: {
       id: true,
@@ -391,6 +392,43 @@ export async function updateEnrollmentStatus(id, status, actorId, req) {
   });
 }
 
+export async function updateEnrollmentClassGroup(id, classGroupId, actorId, req) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.enrollment.findUnique({
+      where: { id },
+      include: {
+        term: { select: { status: true } },
+        classGroup: { select: { classLevelId: true } },
+        _count: { select: { results: true } },
+      },
+    });
+    if (!existing) throw httpError(404, 'ENROLLMENT_NOT_FOUND', 'Enrolment not found.');
+    const destination = await tx.classGroup.findUnique({
+      where: { id: classGroupId },
+      select: { id: true, classLevelId: true },
+    });
+    if (!destination) throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
+    if (existing.classGroupId === destination.id) {
+      return tx.enrollment.findUnique({ where: { id }, include: enrollmentIncludes });
+    }
+    if (existing.status !== 'ACTIVE' || !['DRAFT', 'OPEN'].includes(existing.term.status) || existing._count.results > 0) {
+      throw httpError(409, 'ENROLLMENT_STREAM_LOCKED', 'Only active enrollments in an open term without assessment results can be moved to another stream.');
+    }
+    if (existing.classGroup.classLevelId !== destination.classLevelId) {
+      throw httpError(400, 'CLASS_LEVEL_MISMATCH', 'A student can only be moved to another class group at the same class level.');
+    }
+    const updated = await tx.enrollment.update({
+      where: { id },
+      data: { classGroupId: destination.id },
+      include: enrollmentIncludes,
+    });
+    await tx.auditLog.create({
+      data: auditData(actorId, 'ENROLLMENT_CLASS_GROUP_UPDATED', id, snapshot(existing), snapshot(updated), req),
+    });
+    return updated;
+  });
+}
+
 
 const bulkEligibleStatuses = [
   'ACTIVE',
@@ -691,6 +729,159 @@ export async function createBulkEnrollments(data, actorId, req) {
       maxWait: 5000,
       timeout: 20000
     });
+  } catch (error) {
+    handleDatabaseError(error);
+  }
+}
+
+async function buildSelectedEnrollmentPlan(db, data) {
+  const [targetTerm, targetClass] = await Promise.all([
+    db.term.findUnique({
+      where: { id: data.targetTermId },
+      include: { academicYear: { select: { id: true, name: true } } },
+    }),
+    db.classGroup.findUnique({
+      where: { id: data.targetClassGroupId },
+      include: { classLevel: { select: { id: true, name: true } } },
+    }),
+  ]);
+
+  if (!targetTerm) throw httpError(404, 'TARGET_TERM_NOT_FOUND', 'Destination term not found.');
+  if (!targetClass) throw httpError(404, 'TARGET_CLASS_NOT_FOUND', 'Destination class group not found.');
+  if (!['DRAFT', 'OPEN'].includes(targetTerm.status)) {
+    throw httpError(409, 'TARGET_TERM_NOT_ACCEPTING_ENROLLMENTS', 'The destination term must be in DRAFT or OPEN status.');
+  }
+
+  const students = await db.student.findMany({
+    where: { id: { in: data.studentIds } },
+    select: {
+      id: true,
+      admissionNumber: true,
+      firstName: true,
+      middleName: true,
+      lastName: true,
+      status: true,
+      enrollments: { where: { termId: targetTerm.id }, select: { id: true } },
+    },
+  });
+  const priorEnrollments = data.studentIds.length
+    ? await db.enrollment.findMany({
+        where: {
+          studentId: { in: data.studentIds },
+          status: { in: bulkEligibleStatuses },
+        },
+        include: {
+          term: { include: { academicYear: { select: { startDate: true } } } },
+          nextEnrollment: { select: { id: true } },
+        },
+      })
+    : [];
+  const byId = new Map(students.map((student) => [student.id, student]));
+  const priorByStudent = new Map();
+  for (const previous of priorEnrollments) {
+    if (previous.nextEnrollment || !isEarlierTerm(previous, targetTerm)) continue;
+    const current = priorByStudent.get(previous.studentId);
+    const previousYear = previous.term.academicYear.startDate.getTime();
+    const currentYear = current?.term.academicYear.startDate.getTime() ?? -Infinity;
+    if (!current || previousYear > currentYear || previousYear === currentYear && previous.term.sequence > current.term.sequence) {
+      priorByStudent.set(previous.studentId, previous);
+    }
+  }
+  const eligible = [];
+  const skipped = [];
+
+  for (const studentId of data.studentIds) {
+    const student = byId.get(studentId);
+    if (!student) {
+      skipped.push({ studentId, reason: 'STUDENT_NOT_FOUND' });
+      continue;
+    }
+    const row = {
+      studentId: student.id,
+      admissionNumber: student.admissionNumber,
+      firstName: student.firstName,
+      middleName: student.middleName,
+      lastName: student.lastName,
+      ...(priorByStudent.has(student.id) ? { previousEnrollmentId: priorByStudent.get(student.id).id } : {}),
+    };
+    const reason = student.status !== 'ACTIVE'
+      ? 'STUDENT_NOT_ACTIVE'
+      : student.enrollments.length
+        ? 'ALREADY_ENROLLED_IN_TARGET_TERM'
+        : null;
+    if (reason) skipped.push({ ...row, reason });
+    else eligible.push(row);
+  }
+
+  return { targetTerm, targetClass, eligible, skipped };
+}
+
+function formatSelectedEnrollmentPlan(plan) {
+  return {
+    destination: {
+      termId: plan.targetTerm.id,
+      termName: plan.targetTerm.name,
+      academicYear: plan.targetTerm.academicYear.name,
+      classGroupId: plan.targetClass.id,
+      classGroupName: plan.targetClass.name,
+      classLevel: plan.targetClass.classLevel.name,
+    },
+    summary: { selected: plan.eligible.length + plan.skipped.length, eligible: plan.eligible.length, skipped: plan.skipped.length },
+    eligible: plan.eligible,
+    skipped: plan.skipped,
+  };
+}
+
+export async function previewSelectedBulkEnrollment(data) {
+  return formatSelectedEnrollmentPlan(await buildSelectedEnrollmentPlan(prisma, data));
+}
+
+export async function createSelectedBulkEnrollments(data, actorId, req) {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const plan = await buildSelectedEnrollmentPlan(tx, data);
+      if (!plan.eligible.length) {
+        throw httpError(409, 'NO_ELIGIBLE_STUDENTS', 'There are no eligible students to enrol.');
+      }
+      const created = [];
+      for (const candidate of plan.eligible) {
+        const enrollment = await tx.enrollment.create({
+          data: {
+            studentId: candidate.studentId,
+            termId: plan.targetTerm.id,
+            classGroupId: plan.targetClass.id,
+            ...(candidate.previousEnrollmentId ? { previousEnrollmentId: candidate.previousEnrollmentId } : {}),
+          },
+          include: enrollmentIncludes,
+        });
+        await tx.auditLog.create({
+          data: auditData(actorId, 'ENROLLMENT_CREATED', enrollment.id, null, snapshot(enrollment), req),
+        });
+        created.push(enrollment);
+      }
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'BULK_ENROLLMENT_COMPLETED',
+          entityType: 'EnrollmentBulk',
+          entityId: plan.targetTerm.id,
+          newValues: {
+            targetTermId: plan.targetTerm.id,
+            targetClassGroupId: plan.targetClass.id,
+            createdCount: created.length,
+            skippedCount: plan.skipped.length,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')?.slice(0, 500),
+        },
+      });
+      return {
+        message: 'Selected students enrolled successfully.',
+        summary: { created: created.length, skipped: plan.skipped.length },
+        data: created,
+        skipped: plan.skipped,
+      };
+    }, { maxWait: 5000, timeout: 20000 });
   } catch (error) {
     handleDatabaseError(error);
   }

@@ -9,8 +9,11 @@ import {
   listEnrollmentsController,
   getEnrollmentController,
   updateEnrollmentStatusController,
+  updateEnrollmentClassGroupController,
   previewBulkEnrollmentController,
-  createBulkEnrollmentsController
+  createBulkEnrollmentsController,
+  previewSelectedBulkEnrollmentController,
+  createSelectedBulkEnrollmentsController
 } from './enrollments.controller.js';
 
 export const enrollmentsRouter = Router();
@@ -21,6 +24,9 @@ enrollmentsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER
 enrollmentsRouter.use(authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 enrollmentsRouter.post('/bulk/preview', previewBulkEnrollmentController);
 enrollmentsRouter.post('/bulk', createBulkEnrollmentsController);
+enrollmentsRouter.post('/bulk/selected/preview', previewSelectedBulkEnrollmentController);
+enrollmentsRouter.post('/bulk/selected', createSelectedBulkEnrollmentsController);
 enrollmentsRouter.post('/', createEnrollmentController);
 enrollmentsRouter.patch('/:id/status', updateEnrollmentStatusController);
+enrollmentsRouter.patch('/:id/class-group', updateEnrollmentClassGroupController);
 enrollmentsRouter.get('/:id', getEnrollmentController);

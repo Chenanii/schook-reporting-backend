@@ -33,6 +33,7 @@ export async function createAssessmentController(req, res) {
     parsed.data,
     req.user.id,
     req,
+    req.user.role === 'TEACHER' ? req.user.id : null,
   );
 
   return res.status(201).json({
@@ -49,7 +50,10 @@ export async function listAssessmentsController(req, res) {
     return validationError(res, parsed.error);
   }
 
-  const assessments = await listAssessments(parsed.data);
+  const assessments = await listAssessments(
+    parsed.data,
+    req.user.role === 'TEACHER' ? req.user.id : null,
+  );
 
   return res.status(200).json({
     success: true,
@@ -59,7 +63,10 @@ export async function listAssessmentsController(req, res) {
 }
 
 export async function getAssessmentController(req, res) {
-  const assessment = await getAssessmentById(req.params.id);
+  const assessment = await getAssessmentById(
+    req.params.id,
+    req.user.role === 'TEACHER' ? req.user.id : null,
+  );
 
   return res.status(200).json({
     success: true,
@@ -79,6 +86,7 @@ export async function updateAssessmentController(req, res) {
     parsed.data,
     req.user.id,
     req,
+    req.user.role === 'TEACHER' ? req.user.id : null,
   );
 
   return res.status(200).json({

@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { teacherAssessmentScope } from './assessment-access.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -31,9 +32,9 @@ function resultSnapshot(result) {
   };
 }
 
-export async function getAssessmentResultEntries(assessmentId) {
-  const assessment = await prisma.assessment.findUnique({
-    where: { id: assessmentId },
+export async function getAssessmentResultEntries(assessmentId, teacherUserId = null) {
+  const assessment = await prisma.assessment.findFirst({
+    where: { id: assessmentId, ...teacherAssessmentScope(teacherUserId) },
     select: {
       id: true,
       termId: true,
@@ -96,9 +97,10 @@ export async function saveAssessmentResults(
   inputResults,
   actorId,
   req,
+  teacherUserId = null,
 ) {
-  const assessment = await prisma.assessment.findUnique({
-    where: { id: assessmentId },
+  const assessment = await prisma.assessment.findFirst({
+    where: { id: assessmentId, ...teacherAssessmentScope(teacherUserId) },
     select: {
       id: true,
       title: true,

@@ -53,7 +53,10 @@ export async function listStudentsController(req, res, next) {
       return validationError(res, parsed.error);
     }
 
-    const result = await listStudents(parsed.data);
+    const result = await listStudents(
+      parsed.data,
+      req.user.role === 'TEACHER' ? req.user.id : null,
+    );
 
     return res.status(200).json({
       success: true,
@@ -66,7 +69,10 @@ export async function listStudentsController(req, res, next) {
 
 export async function getStudentController(req, res, next) {
   try {
-    const student = await getStudentById(req.params.id);
+    const student = await getStudentById(
+      req.params.id,
+      req.user.role === 'TEACHER' ? req.user.id : null,
+    );
 
     return res.status(200).json({
       success: true,
