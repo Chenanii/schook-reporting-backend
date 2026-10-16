@@ -1,5 +1,17 @@
 import { saveAssessmentResultsSchema } from './assessment-results.validation.js';
-import { saveAssessmentResults } from './assessment-results.service.js';
+import {
+  getAssessmentResultEntries,
+  saveAssessmentResults
+} from './assessment-results.service.js';
+
+export async function getAssessmentResultsController(req, res) {
+  const results = await getAssessmentResultEntries(req.params.id);
+  return res.status(200).json({
+    success: true,
+    data: results,
+    count: results.length
+  });
+}
 
 export async function saveAssessmentResultsController(req, res) {
   const parsed = saveAssessmentResultsSchema.safeParse(req.body);

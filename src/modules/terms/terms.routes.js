@@ -14,10 +14,10 @@ import {
 
 export const termsRouter = Router();
 
-termsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+termsRouter.use(authenticate, requireActiveSubscription);
 
-termsRouter.post('/', createTermController);
-termsRouter.get('/', listTermsController);
-termsRouter.get('/:id', getTermController);
-termsRouter.patch('/:id', updateTermController);
-termsRouter.patch('/:id/status', updateTermStatusController);
+termsRouter.post('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), createTermController);
+termsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'), listTermsController);
+termsRouter.get('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), getTermController);
+termsRouter.patch('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), updateTermController);
+termsRouter.patch('/:id/status', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), updateTermStatusController);

@@ -485,6 +485,7 @@ model Subject {
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   classLinks    ClassSubject[]
+  teachingAssignments TeachingAssignment[]
   assessments   Assessment[]
   termResults   TermSubjectResult[]
   annualResults AnnualSubjectResult[]
@@ -527,7 +528,8 @@ model TeachingAssignment {
   id             String @id @default(cuid())
   teacherId      String
   classGroupId   String
-  classSubjectId String
+  subjectId      String
+  classSubjectId String?
   termId         String
   schoolId       String
 
@@ -535,7 +537,8 @@ model TeachingAssignment {
 
   teacher      Teacher      @relation(fields: [teacherId], references: [id], onDelete: Restrict)
   classGroup   ClassGroup   @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
-  classSubject ClassSubject @relation(fields: [classSubjectId], references: [id], onDelete: Restrict)
+  subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  classSubject ClassSubject? @relation(fields: [classSubjectId], references: [id], onDelete: Restrict)
   term         Term         @relation(fields: [termId], references: [id], onDelete: Restrict)
 
   assessments Assessment[]
@@ -543,9 +546,10 @@ model TeachingAssignment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([teacherId, classGroupId, classSubjectId, termId])
+  @@unique([teacherId, classGroupId, subjectId, termId])
   @@index([teacherId, termId])
   @@index([classGroupId, termId])
+  @@index([subjectId, termId])
   @@index([classSubjectId, termId])
   @@index([schoolId])
 }

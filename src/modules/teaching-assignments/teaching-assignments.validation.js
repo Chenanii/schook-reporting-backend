@@ -6,14 +6,14 @@ const idSchema = z.string().trim().min(1, 'ID is required.');
 export const createTeachingAssignmentSchema = z.object({
   teacherId: idSchema,
   classGroupId: idSchema,
-  classSubjectId: idSchema,
+  subjectId: idSchema,
   termId: idSchema
 }).strict();
 
 export const updateTeachingAssignmentSchema = z.object({
   teacherId: idSchema.optional(),
   classGroupId: idSchema.optional(),
-  classSubjectId: idSchema.optional(),
+  subjectId: idSchema.optional(),
   termId: idSchema.optional()
 }).strict().refine(
   (data) => Object.keys(data).length > 0,
@@ -25,7 +25,7 @@ export const listTeachingAssignmentsSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   teacherId: idSchema.optional(),
   classGroupId: idSchema.optional(),
-  classSubjectId: idSchema.optional(),
+  subjectId: idSchema.optional(),
   termId: idSchema.optional()
 });
 

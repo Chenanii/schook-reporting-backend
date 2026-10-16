@@ -138,7 +138,7 @@ export async function listClassGroups(filters) {
       ],
       include: {
         classLevel: {
-          select: { id: true, name: true, levelOrder: true }
+          select: { id: true, name: true, levelOrder: true, nextLevelId: true }
         },
         _count: {
           select: {
@@ -193,7 +193,15 @@ export async function updateClassGroup(id, data, actorId, req) {
   try {
     return await prisma.$transaction(async (tx) => {
       const existing = await tx.classGroup.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              enrollments: true,
+              assignments: true
+            }
+          }
+        }
       });
 
       if (!existing) {
@@ -207,6 +215,17 @@ export async function updateClassGroup(id, data, actorId, req) {
       const classLevelId = data.classLevelId ?? existing.classLevelId;
 
       if (data.classLevelId) {
+        if (
+          data.classLevelId !== existing.classLevelId
+          && (existing._count.enrollments > 0 || existing._count.assignments > 0)
+        ) {
+          throw httpError(
+            409,
+            'CLASS_GROUP_HAS_RECORDS',
+            'A class group with enrolments or teaching assignments cannot be moved to another class level.'
+          );
+        }
+
         const classLevel = await tx.classLevel.findUnique({
           where: { id: classLevelId },
           select: { id: true }

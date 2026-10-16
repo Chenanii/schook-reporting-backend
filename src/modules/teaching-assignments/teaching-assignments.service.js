@@ -25,6 +25,7 @@ function snapshot(assignment) {
   return {
     teacherId: assignment.teacherId,
     classGroupId: assignment.classGroupId,
+    subjectId: assignment.subjectId,
     classSubjectId: assignment.classSubjectId,
     termId: assignment.termId
   };
@@ -87,6 +88,14 @@ const assignmentInclude = {
       }
     }
   },
+  subject: {
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      status: true
+    }
+  },
   term: true,
   _count: {
     select: {
@@ -96,7 +105,7 @@ const assignmentInclude = {
 };
 
 async function validateAssignmentReferences(tx, data) {
-  const [teacher, classGroup, classSubject, term] = await Promise.all([
+  const [teacher, classGroup, subject, term] = await Promise.all([
     tx.teacher.findUnique({
       where: { id: data.teacherId },
       select: { id: true }
@@ -108,14 +117,12 @@ async function validateAssignmentReferences(tx, data) {
         classLevelId: true
       }
     }),
-    tx.classSubject.findUnique({
-      where: { id: data.classSubjectId },
+    tx.subject.findUnique({
+      where: { id: data.subjectId },
       select: {
         id: true,
-        classLevelId: true,
-        subject: {
-          select: { status: true }
-        }
+        status: true,
+        classLinks: { select: { id: true, classLevelId: true } }
       }
     }),
     tx.term.findUnique({
@@ -136,11 +143,11 @@ async function validateAssignmentReferences(tx, data) {
     );
   }
 
-  if (!classSubject) {
+  if (!subject) {
     throw httpError(
       404,
-      'CLASS_SUBJECT_NOT_FOUND',
-      'Class subject link not found.'
+      'SUBJECT_NOT_FOUND',
+      'Subject not found.'
     );
   }
 
@@ -148,30 +155,36 @@ async function validateAssignmentReferences(tx, data) {
     throw httpError(404, 'TERM_NOT_FOUND', 'Academic term not found.');
   }
 
-  if (classGroup.classLevelId !== classSubject.classLevelId) {
+  const classSubject = subject.classLinks.find(
+    (link) => link.classLevelId === classGroup.classLevelId
+  );
+
+  if (subject.classLinks.length > 0 && !classSubject) {
     throw httpError(
       400,
       'CLASS_LEVEL_MISMATCH',
-      'The selected subject is not linked to the class level of this class group.'
+      'This subject is linked to a different class level.'
     );
   }
 
-  if (classSubject.subject.status !== 'ACTIVE') {
+  if (subject.status !== 'ACTIVE') {
     throw httpError(
       409,
       'SUBJECT_NOT_ACTIVE',
       'Only active subjects can be assigned to a teacher.'
     );
   }
+
+  return { classSubjectId: classSubject?.id ?? null };
 }
 
 export async function createTeachingAssignment(data, actorId, req) {
   try {
     return await prisma.$transaction(async (tx) => {
-      await validateAssignmentReferences(tx, data);
+      const { classSubjectId } = await validateAssignmentReferences(tx, data);
 
       const assignment = await tx.teachingAssignment.create({
-        data,
+        data: { ...data, classSubjectId },
         include: assignmentInclude
       });
 
@@ -199,14 +212,14 @@ export async function listTeachingAssignments(filters) {
     limit,
     teacherId,
     classGroupId,
-    classSubjectId,
+    subjectId,
     termId
   } = filters;
 
   const where = {
     ...(teacherId ? { teacherId } : {}),
     ...(classGroupId ? { classGroupId } : {}),
-    ...(classSubjectId ? { classSubjectId } : {}),
+    ...(subjectId ? { subjectId } : {}),
     ...(termId ? { termId } : {})
   };
 
@@ -276,13 +289,13 @@ export async function updateTeachingAssignment(id, data, actorId, req) {
       const merged = {
         teacherId: data.teacherId ?? existing.teacherId,
         classGroupId: data.classGroupId ?? existing.classGroupId,
-        classSubjectId: data.classSubjectId ?? existing.classSubjectId,
+        subjectId: data.subjectId ?? existing.subjectId,
         termId: data.termId ?? existing.termId
       };
 
       const changesStructure =
         merged.classGroupId !== existing.classGroupId ||
-        merged.classSubjectId !== existing.classSubjectId ||
+        merged.subjectId !== existing.subjectId ||
         merged.termId !== existing.termId;
 
       if (existing._count.assessments > 0 && changesStructure) {
@@ -293,11 +306,11 @@ export async function updateTeachingAssignment(id, data, actorId, req) {
         );
       }
 
-      await validateAssignmentReferences(tx, merged);
+      const { classSubjectId } = await validateAssignmentReferences(tx, merged);
 
       const updated = await tx.teachingAssignment.update({
         where: { id },
-        data: merged,
+        data: { ...merged, classSubjectId },
         include: assignmentInclude
       });
 

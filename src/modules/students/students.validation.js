@@ -1,13 +1,6 @@
 
 import { z } from 'zod';
 
-const admissionNumber = z
-  .string()
-  .trim()
-  .min(1, 'Admission number is required.')
-  .max(50, 'Admission number must not exceed 50 characters.')
-  .transform((value) => value.toUpperCase());
-
 const firstName = z
   .string()
   .trim()
@@ -38,7 +31,6 @@ const gender = z
 const studentStatus = z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']);
 
 export const createStudentSchema = z.object({
-  admissionNumber,
   firstName,
   middleName: middleName.optional(),
   lastName,
@@ -48,7 +40,6 @@ export const createStudentSchema = z.object({
 }).strict();
 
 export const updateStudentSchema = z.object({
-  admissionNumber: admissionNumber.optional(),
   firstName: firstName.optional(),
   middleName: middleName.optional(),
   lastName: lastName.optional(),

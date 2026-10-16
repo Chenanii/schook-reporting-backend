@@ -47,22 +47,37 @@ async function validateScope(db, { termId, classGroupId, subjectId }) {
     throw httpError(404, 'SUBJECT_NOT_FOUND', 'Subject not found.');
   }
 
-  const classSubject = await db.classSubject.findUnique({
+  const classSubjects = await db.classSubject.findMany({
     where: {
-      classLevelId_subjectId: {
-        classLevelId: classGroup.classLevelId,
-        subjectId,
-      },
+      subjectId,
     },
-    select: { id: true },
+    select: { classLevelId: true },
   });
 
-  if (!classSubject) {
+  const matchingClassSubject = classSubjects.some(
+    (link) => link.classLevelId === classGroup.classLevelId,
+  );
+
+  if (classSubjects.length > 0 && !matchingClassSubject) {
     throw httpError(
       409,
       'SUBJECT_NOT_ASSIGNED_TO_CLASS',
-      'This subject is not assigned to the class level.',
+      'This subject is linked to a different class level.',
     );
+  }
+
+  if (classSubjects.length === 0) {
+    const assignment = await db.teachingAssignment.findFirst({
+      where: { termId, classGroupId, subjectId },
+      select: { id: true },
+    });
+    if (!assignment) {
+      throw httpError(
+        409,
+        'SUBJECT_NOT_ASSIGNED_TO_CLASS_GROUP',
+        'Assign this standalone subject to a teacher and class group for this term before managing its results.',
+      );
+    }
   }
 
   return { term, classGroup, subject };
@@ -75,7 +90,18 @@ async function getActiveEnrollments(db, { termId, classGroupId }) {
       classGroupId,
       status: 'ACTIVE',
     },
-    select: { id: true, studentId: true },
+    select: {
+      id: true,
+      studentId: true,
+      student: {
+        select: {
+          admissionNumber: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+        },
+      },
+    },
   });
 
   if (enrollments.length === 0) {
@@ -109,6 +135,14 @@ async function getScopedResults(db, { termId, classGroupId, subjectId }) {
           classGroupId: true,
           termId: true,
           status: true,
+          student: {
+            select: {
+              admissionNumber: true,
+              firstName: true,
+              middleName: true,
+              lastName: true,
+            },
+          },
         },
       },
       subject: {
@@ -148,9 +182,10 @@ export async function listTermSubjectResults({
   return {
     expectedCount: enrollments.length,
     resultCount: results.length,
-    missingCount: enrollments.filter(
+    missingCount: enrollments.filter((enrollment) => !resultEnrollmentIds.has(enrollment.id)).length,
+    missingEnrollments: enrollments.filter(
       (enrollment) => !resultEnrollmentIds.has(enrollment.id),
-    ).length,
+    ),
     data: results,
   };
 }

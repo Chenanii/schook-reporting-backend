@@ -310,7 +310,10 @@ export async function listEnrollments(filters) {
         { createdAt: 'desc' },
         { id: 'asc' }
       ],
-      include: enrollmentIncludes
+      include: {
+        ...enrollmentIncludes,
+        nextEnrollment: { select: { id: true } }
+      }
     }),
     prisma.enrollment.count({ where })
   ]);

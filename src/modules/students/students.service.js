@@ -1,4 +1,5 @@
 
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 
 function httpError(statusCode, code, message) {
@@ -60,9 +61,10 @@ const studentIncludes = {
 export async function createStudent(data, actorId, req) {
   try {
     return await prisma.$transaction(async (tx) => {
+      const admissionNumber = `STU-${new Date().getFullYear()}-${randomUUID().toUpperCase()}`;
       const student = await tx.student.create({
         data: {
-          admissionNumber: data.admissionNumber,
+          admissionNumber,
           firstName: data.firstName,
           ...(data.middleName !== undefined
             ? { middleName: data.middleName }
@@ -239,9 +241,6 @@ export async function updateStudent(id, data, actorId, req) {
       const updated = await tx.student.update({
         where: { id },
         data: {
-          ...(data.admissionNumber !== undefined
-            ? { admissionNumber: data.admissionNumber }
-            : {}),
           ...(data.firstName !== undefined
             ? { firstName: data.firstName }
             : {}),

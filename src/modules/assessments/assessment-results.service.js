@@ -31,6 +31,66 @@ function resultSnapshot(result) {
   };
 }
 
+export async function getAssessmentResultEntries(assessmentId) {
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: {
+      id: true,
+      termId: true,
+      teachingAssignment: {
+        select: { classGroupId: true }
+      }
+    }
+  });
+
+  if (!assessment) {
+    throw httpError(404, 'ASSESSMENT_NOT_FOUND', 'Assessment not found.');
+  }
+
+  const enrollments = await prisma.enrollment.findMany({
+    where: {
+      termId: assessment.termId,
+      classGroupId: assessment.teachingAssignment.classGroupId,
+      status: 'ACTIVE'
+    },
+    select: {
+      id: true,
+      student: {
+        select: {
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          admissionNumber: true
+        }
+      },
+      results: {
+        where: { assessmentId },
+        select: {
+          mark: true,
+          status: true,
+          teacherComment: true
+        },
+        take: 1
+      }
+    },
+    orderBy: [
+      { student: { lastName: 'asc' } },
+      { student: { firstName: 'asc' } }
+    ]
+  });
+
+  return enrollments.map((enrollment) => {
+    const result = enrollment.results[0];
+    return {
+      enrollmentId: enrollment.id,
+      student: enrollment.student,
+      mark: result?.mark?.toString() ?? '',
+      status: result?.status ?? 'NOT_ENTERED',
+      teacherComment: result?.teacherComment ?? ''
+    };
+  });
+}
+
 export async function saveAssessmentResults(
   assessmentId,
   inputResults,

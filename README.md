@@ -105,8 +105,9 @@ Prisma's relational schema cannot enforce every cross-record academic rule by it
 3. Marks are between zero and the assessment maximum; a missing mark is not silently treated as zero.
 4. Finalized/published terms and locked assessments cannot be edited without an explicit authorized reopening workflow.
 5. Promotion creates a new enrolment for the destination term/class and preserves the previous enrolment and all historical results.
+6. Subjects can be assigned directly to a teacher and class group as standalone subjects. When a subject has curriculum links, assignments must use a class group at one of those linked levels.
 
 Promotion policies are configured per class level by school administrators and headteachers using `GET /api/v1/promotions/policies` and `PUT /api/v1/promotions/policies/:classLevelId`. Policies set a minimum average, subject pass mark, minimum number of subjects passed, and subjects that must be passed. If a level has no saved policy, the system uses a 50% average and pass mark, requires at least half of its assigned subjects passed, and has no compulsory pass subjects. Recommendations use published final-term subject marks. Staff can override recommendations during approval, but must record a reason; the approved batch stores the policy and recommendation snapshot. Final-year students can repeat or graduate based on the policy.
-6. Sensitive operations are transactional and produce audit records.
+7. Sensitive operations are transactional and produce audit records.
 
 Payment collection, automated renewal and webhook reconciliation are the next billing phase. Before production launch, add automated tests, backups, monitoring, and a shared rate-limit store for multi-instance deployments.

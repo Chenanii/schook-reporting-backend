@@ -11,6 +11,7 @@ import {
 } from './assessments.controller.js';
 
 import {
+  getAssessmentResultsController,
   saveAssessmentResultsController,
 } from './assessment-results.controller.js';
 
@@ -40,6 +41,7 @@ assessmentsRouter.post('/', createAssessmentController);
 assessmentsRouter.get('/', listAssessmentsController);
 assessmentsRouter.get('/:id', getAssessmentController);
 assessmentsRouter.patch('/:id', updateAssessmentController);
+assessmentsRouter.get('/:id/results', getAssessmentResultsController);
 assessmentsRouter.put('/:id/results', saveAssessmentResultsController);
 assessmentsRouter.post('/:id/transition', transitionAssessmentController);
 assessmentsRouter.post('/terms/:termId/results/calculate', calculateTermSubjectResultsController,);

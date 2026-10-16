@@ -13,9 +13,9 @@ import {
 
 export const classGroupsRouter = Router();
 
-classGroupsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+classGroupsRouter.use(authenticate, requireActiveSubscription);
 
-classGroupsRouter.post('/', createClassGroupController);
-classGroupsRouter.get('/', listClassGroupsController);
-classGroupsRouter.get('/:id', getClassGroupController);
-classGroupsRouter.patch('/:id', updateClassGroupController);
+classGroupsRouter.post('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), createClassGroupController);
+classGroupsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'), listClassGroupsController);
+classGroupsRouter.get('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), getClassGroupController);
+classGroupsRouter.patch('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), updateClassGroupController);

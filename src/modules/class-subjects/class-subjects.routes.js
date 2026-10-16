@@ -13,9 +13,9 @@ import {
 
 export const classSubjectsRouter = Router();
 
-classSubjectsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+classSubjectsRouter.use(authenticate, requireActiveSubscription);
 
-classSubjectsRouter.post('/', createClassSubjectController);
-classSubjectsRouter.get('/', listClassSubjectsController);
-classSubjectsRouter.get('/:id', getClassSubjectController);
-classSubjectsRouter.delete('/:id', deleteClassSubjectController);
+classSubjectsRouter.post('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), createClassSubjectController);
+classSubjectsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'), listClassSubjectsController);
+classSubjectsRouter.get('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), getClassSubjectController);
+classSubjectsRouter.delete('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'), deleteClassSubjectController);

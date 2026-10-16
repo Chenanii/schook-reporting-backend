@@ -39,13 +39,31 @@ const assessmentInclude = {
   teachingAssignment: {
     include: {
       teacher: true,
-      classGroup: true,
+      classGroup: {
+        include: {
+          classLevel: {
+            select: {
+              id: true,
+              name: true,
+              levelOrder: true
+            }
+          }
+        }
+      },
       classSubject: {
         include: {
           subject: true,
           classLevel: true,
         },
       },
+      subject: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          status: true
+        }
+      }
     },
   },
   _count: {
@@ -81,11 +99,7 @@ export async function createAssessment(data, actorId, req) {
     select: {
       id: true,
       termId: true,
-      classSubject: {
-        select: {
-          subjectId: true,
-        },
-      },
+      subjectId: true,
     },
   });
 
@@ -134,7 +148,7 @@ export async function createAssessment(data, actorId, req) {
         weightPercent: data.weightPercent,
         termId: data.termId,
         teachingAssignmentId: assignment.id,
-        subjectId: assignment.classSubject.subjectId,
+        subjectId: assignment.subjectId,
       },
       include: assessmentInclude,
     });

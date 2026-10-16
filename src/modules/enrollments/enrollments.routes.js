@@ -15,11 +15,12 @@ import {
 
 export const enrollmentsRouter = Router();
 
-enrollmentsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
+enrollmentsRouter.use(authenticate, requireActiveSubscription);
+enrollmentsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'), listEnrollmentsController);
 
+enrollmentsRouter.use(authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'));
 enrollmentsRouter.post('/bulk/preview', previewBulkEnrollmentController);
 enrollmentsRouter.post('/bulk', createBulkEnrollmentsController);
 enrollmentsRouter.post('/', createEnrollmentController);
-enrollmentsRouter.get('/', listEnrollmentsController);
 enrollmentsRouter.patch('/:id/status', updateEnrollmentStatusController);
 enrollmentsRouter.get('/:id', getEnrollmentController);
