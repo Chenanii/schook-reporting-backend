@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
+import { normalizeParentIdentifier } from '../parent-portal/contact.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -23,15 +24,29 @@ function publicUser(user) {
   };
 }
 
-export async function login({ email, password }) {
-  const user = await prisma.user.findUnique({
-    where: { email },
-    include: { school: { select: { id: true, name: true, slug: true } } }
-  });
+export async function login({ identifier, password }) {
+  const normalized = normalizeParentIdentifier(identifier);
+  let user = null;
+  if (normalized?.type === 'email') {
+    user = await prisma.user.findUnique({
+      where: { email: normalized.value },
+      include: { school: { select: { id: true, name: true, slug: true } } }
+    });
+  } else if (normalized?.type === 'phone') {
+    const matchingUsers = await prisma.user.findMany({
+      where: {
+        role: 'PARENT',
+        parents: { some: { phone: { in: normalized.variants } } }
+      },
+      include: { school: { select: { id: true, name: true, slug: true } } },
+      take: 2
+    });
+    if (matchingUsers.length === 1) [user] = matchingUsers;
+  }
 
-  // Use the same error for an unknown email and a wrong password.
+  // Keep unknown identifiers and incorrect passwords indistinguishable.
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    throw httpError(401, 'INVALID_CREDENTIALS', 'Invalid email or password.');
+    throw httpError(401, 'INVALID_CREDENTIALS', 'Invalid email/phone number or password.');
   }
 
   if (user.status !== 'ACTIVE') {

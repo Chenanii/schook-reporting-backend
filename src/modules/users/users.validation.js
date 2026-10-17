@@ -9,6 +9,7 @@ const staffRoles = [
   'TEACHER',
   'FORM_TUTOR'
 ];
+const manageableRoles = [...staffRoles, 'PARENT'];
 
 export const createStaffSchema = z.object({
   email: z.string().trim().email().transform((value) => value.toLowerCase()),
@@ -23,7 +24,7 @@ export const updateStaffSchema = z.object({
   email: z.string().trim().email().transform((value) => value.toLowerCase()).optional(),
   firstName: z.string().trim().min(1).max(80).optional(),
   lastName: z.string().trim().min(1).max(80).optional(),
-  role: z.enum(staffRoles).optional(),
+  role: z.enum(manageableRoles).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
   staffNumber: z.string().trim().min(1).max(30).nullable().optional()
 }).refine(
@@ -35,6 +36,6 @@ export const listStaffSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().max(100).optional(),
-  role: z.enum(staffRoles).optional(),
+  role: z.enum(manageableRoles).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional()
 });

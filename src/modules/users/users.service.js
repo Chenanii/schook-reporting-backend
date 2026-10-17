@@ -10,6 +10,7 @@ const staffRoles = [
   'TEACHER',
   'FORM_TUTOR'
 ];
+const manageableRoles = [...staffRoles, 'PARENT'];
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -111,7 +112,7 @@ export async function listStaff(filters) {
   const { page, limit, search, role, status } = filters;
 
   const where = {
-    role: { in: staffRoles },
+    role: { in: manageableRoles },
     ...(role ? { role } : {}),
     ...(status ? { status } : {}),
     ...(search
@@ -150,7 +151,7 @@ export async function listStaff(filters) {
 
 export async function getStaffById(id) {
   const user = await prisma.user.findFirst({
-    where: { id, role: { in: staffRoles } },
+    where: { id, role: { in: manageableRoles } },
     include: { teacher: true }
   });
 
@@ -169,7 +170,7 @@ export async function updateStaff(id, data, actorId, req) {
         include: { teacher: true }
       });
 
-      if (!current || !staffRoles.includes(current.role)) {
+      if (!current || !manageableRoles.includes(current.role)) {
         throw httpError(404, 'STAFF_NOT_FOUND', 'Staff account not found.');
       }
 
@@ -184,7 +185,12 @@ export async function updateStaff(id, data, actorId, req) {
       // Do not allow removal or deactivation of the last active super admin.
       // Super admins cannot be targeted by this staff endpoint.
       const nextRole = data.role ?? current.role;
-      const nextStatus = data.status ?? current.status;
+      if (nextRole === 'PARENT' && current.role !== 'PARENT') {
+        throw httpError(400, 'PARENT_VERIFICATION_REQUIRED', 'Parents must create their account using a verified email address or phone number linked to a student.');
+      }
+      if (current.role === 'PARENT' && data.email !== undefined && data.email.toLowerCase() !== current.email?.toLowerCase()) {
+        throw httpError(400, 'PARENT_EMAIL_UPDATE_UNAVAILABLE', 'Parent email changes must be verified through parent account setup.');
+      }
 
       const updated = await tx.user.update({
         where: { id },
@@ -197,6 +203,22 @@ export async function updateStaff(id, data, actorId, req) {
         },
         include: { teacher: true }
       });
+
+      if (current.role === 'PARENT' && (data.firstName !== undefined || data.lastName !== undefined)) {
+        await tx.parent.updateMany({
+          where: { userId: id },
+          data: {
+            ...(data.firstName !== undefined ? { firstName: data.firstName } : {}),
+            ...(data.lastName !== undefined ? { lastName: data.lastName } : {})
+          }
+        });
+      }
+      if (current.role === 'PARENT' && nextRole !== 'PARENT') {
+        await tx.parent.updateMany({
+          where: { userId: id },
+          data: { userId: null }
+        });
+      }
 
       const teacherRole = nextRole === 'TEACHER' || nextRole === 'FORM_TUTOR';
 
@@ -223,7 +245,7 @@ export async function updateStaff(id, data, actorId, req) {
       await tx.auditLog.create({
         data: {
           actorId,
-          action: 'STAFF_UPDATED',
+          action: current.role === 'PARENT' ? 'PARENT_ACCOUNT_UPDATED' : 'STAFF_UPDATED',
           entityType: 'User',
           entityId: id,
           oldValues: {

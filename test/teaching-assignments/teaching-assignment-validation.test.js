@@ -10,7 +10,7 @@ const validAssignment = {
   teacherId: 'teacher-1',
   classGroupId: 'class-group-1',
   subjectId: 'subject-1',
-  termId: 'term-1'
+  academicYearId: 'year-1'
 };
 
 test('accepts a teaching assignment for a standalone subject', () => {
@@ -35,4 +35,17 @@ test('rejects legacy classSubjectId input instead of a subjectId', () => {
 
 test('allows updating the assigned subject directly', () => {
   assert.equal(updateTeachingAssignmentSchema.safeParse({ subjectId: 'subject-2' }).success, true);
+});
+
+test('requires an academic year instead of a single term for new assignments', () => {
+  const { academicYearId, ...assignment } = validAssignment;
+  assert.equal(createTeachingAssignmentSchema.safeParse({ ...assignment, termId: 'term-1' }).success, false);
+  assert.equal(createTeachingAssignmentSchema.safeParse({ ...assignment, academicYearId }).success, true);
+});
+
+test('accepts a term from which a teacher change takes effect', () => {
+  assert.equal(updateTeachingAssignmentSchema.safeParse({
+    teacherId: 'teacher-2',
+    effectiveFromTermId: 'term-2'
+  }).success, true);
 });

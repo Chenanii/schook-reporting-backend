@@ -340,11 +340,109 @@ export async function updateStudent(id, data, actorId, req) {
   try {
     return await prisma.$transaction(async (tx) => {
       const existing = await tx.student.findUnique({
-        where: { id }
+        where: { id },
+        include: { parents: { include: { parent: true } } }
       });
 
       if (!existing) {
         throw httpError(404, 'STUDENT_NOT_FOUND', 'Student not found.');
+      }
+
+      if (data.parents !== undefined) {
+        const currentParents = new Map(existing.parents.map(({ parent }) => [parent.id, parent]));
+        const retainedParentIds = [];
+
+        for (const [index, contact] of data.parents.entries()) {
+          const email = contact.email?.trim().toLowerCase() || null;
+          const phone = contact.phone?.trim() || null;
+          let parent;
+
+          if (contact.parentId) {
+            parent = currentParents.get(contact.parentId);
+            if (!parent) {
+              throw httpError(400, 'INVALID_STUDENT_PARENT', 'A parent contact does not belong to this student.');
+            }
+            parent = await tx.parent.update({
+              where: { id: parent.id },
+              data: {
+                firstName: contact.firstName,
+                lastName: contact.lastName,
+                email,
+                phone
+              }
+            });
+            if (parent.userId) {
+              await tx.user.update({
+                where: { id: parent.userId },
+                data: {
+                  email,
+                  firstName: contact.firstName,
+                  lastName: contact.lastName
+                }
+              });
+            }
+          } else {
+            parent = email
+              ? await tx.parent.findFirst({
+                  where: { schoolId: existing.schoolId, email: { equals: email, mode: 'insensitive' } }
+                })
+              : phone
+                ? await tx.parent.findFirst({
+                    where: { schoolId: existing.schoolId, phone, firstName: contact.firstName, lastName: contact.lastName }
+                  })
+                : null;
+
+            if (parent) {
+              parent = await tx.parent.update({
+                where: { id: parent.id },
+                data: { firstName: contact.firstName, lastName: contact.lastName, email, phone }
+              });
+              if (parent.userId) {
+                await tx.user.update({
+                  where: { id: parent.userId },
+                  data: {
+                    email,
+                    firstName: contact.firstName,
+                    lastName: contact.lastName
+                  }
+                });
+              }
+            } else {
+              parent = await tx.parent.create({
+                data: {
+                  schoolId: existing.schoolId,
+                  firstName: contact.firstName,
+                  lastName: contact.lastName,
+                  email,
+                  phone
+                }
+              });
+            }
+          }
+
+          retainedParentIds.push(parent.id);
+          await tx.parentStudent.upsert({
+            where: { parentId_studentId: { parentId: parent.id, studentId: id } },
+            create: {
+              parentId: parent.id,
+              studentId: id,
+              schoolId: existing.schoolId,
+              relationship: contact.relationship || null,
+              isPrimary: index === 0
+            },
+            update: {
+              relationship: contact.relationship || null,
+              isPrimary: index === 0
+            }
+          });
+        }
+
+        await tx.parentStudent.deleteMany({
+          where: {
+            studentId: id,
+            ...(retainedParentIds.length ? { parentId: { notIn: retainedParentIds } } : {})
+          }
+        });
       }
 
       const updated = await tx.student.update({
@@ -376,15 +474,51 @@ export async function updateStudent(id, data, actorId, req) {
           actorId,
           'STUDENT_UPDATED',
           id,
-          snapshot(existing),
-          snapshot(updated),
+          {
+            ...snapshot(existing),
+            ...(data.parents !== undefined ? {
+              parents: existing.parents.map(({ parent, relationship }) => ({
+                id: parent.id,
+                firstName: parent.firstName,
+                lastName: parent.lastName,
+                email: parent.email,
+                phone: parent.phone,
+                relationship
+              }))
+            } : {})
+          },
+          {
+            ...snapshot(updated),
+            ...(data.parents !== undefined ? {
+              parents: data.parents.map(({ parentId, firstName, lastName, email, phone, relationship }) => ({
+                id: parentId ?? null,
+                firstName,
+                lastName,
+                email: email || null,
+                phone: phone || null,
+                relationship: relationship || null
+              }))
+            } : {})
+          },
           req
         )
       });
 
-      return updated;
+      return data.parents === undefined
+        ? updated
+        : tx.student.findUnique({
+            where: { id },
+            include: { ...studentIncludes, parents: { include: { parent: true } } }
+          });
     });
   } catch (error) {
+    if (error.code === 'P2002' && data.parents !== undefined) {
+      throw httpError(
+        409,
+        'PARENT_CONTACT_ALREADY_EXISTS',
+        'A parent contact or account already uses this email address.'
+      );
+    }
     handleDatabaseError(error);
   }
 }

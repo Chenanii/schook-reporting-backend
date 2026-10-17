@@ -29,6 +29,17 @@ const gender = z
   .max(30, 'Gender must not exceed 30 characters.');
 
 const studentStatus = z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']);
+const parentContact = z.object({
+  parentId: z.string().trim().min(1).optional(),
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+  phone: z.string().trim().min(5).max(30).optional().or(z.literal('')),
+  email: z.string().trim().email().transform((value) => value.toLowerCase()).optional().or(z.literal('')),
+  relationship: z.string().trim().max(40).optional()
+}).strict();
+const registrationParentContact = parentContact
+  .omit({ parentId: true })
+  .extend({ phone: z.string().trim().min(5).max(30) });
 
 export const createStudentSchema = z.object({
   termId: z.string().trim().min(1, 'Academic term is required.'),
@@ -39,13 +50,7 @@ export const createStudentSchema = z.object({
   dateOfBirth: dateOfBirth.nullable().optional(),
   gender: gender.nullable().optional(),
   status: studentStatus.optional(),
-  parents: z.array(z.object({
-    firstName: z.string().trim().min(1).max(80),
-    lastName: z.string().trim().min(1).max(80),
-    phone: z.string().trim().min(5).max(30),
-    email: z.string().trim().email().transform((value) => value.toLowerCase()).optional().or(z.literal('')),
-    relationship: z.string().trim().max(40).optional()
-  }).strict()).min(1, 'Add at least one parent or guardian.').max(5)
+  parents: z.array(registrationParentContact).min(1, 'Add at least one parent or guardian.').max(5)
 }).strict();
 
 export const updateStudentSchema = z.object({
@@ -53,7 +58,11 @@ export const updateStudentSchema = z.object({
   middleName: middleName.optional(),
   lastName: lastName.optional(),
   dateOfBirth: dateOfBirth.nullable().optional(),
-  gender: gender.nullable().optional()
+  gender: gender.nullable().optional(),
+  parents: z.array(parentContact).max(5).refine(
+    (parents) => parents.every(({ phone, email }) => Boolean(phone || email)),
+    { message: 'Provide a phone number or email address for each parent or guardian.' }
+  ).optional()
 }).strict().refine(
   (data) => Object.keys(data).length > 0,
   { message: 'Provide at least one field to update.' }

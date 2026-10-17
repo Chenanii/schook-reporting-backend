@@ -70,7 +70,6 @@ export function requirePlanCapacity(resource) {
   return async function enforcePlanCapacity(req, res, next) {
     try {
       if (req.user?.role === 'SUPER_ADMIN' || !req.schoolId) return next();
-
       const now = new Date();
       const subscription = await prisma.schoolSubscription.findFirst({
         where: {

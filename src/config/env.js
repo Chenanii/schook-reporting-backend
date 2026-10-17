@@ -21,6 +21,12 @@ const envSchema = z.object({
   MAIL_PASSWORD: z.string().optional(),
   MAIL_FROM: z.string().email().optional(),
 
+  TEXTBEE_API_KEY: z.string().optional(),
+  TEXTBEE_DEVICE_ID: z.string().optional(),
+  TEXTBEE_API_BASE_URL: z.string().url().default('https://api.textbee.dev/api/v1'),
+  TEXTBEE_DEFAULT_COUNTRY_CODE: z.string().regex(/^\d{1,3}$/).default('265'),
+  PARENT_PORTAL_OTP_TTL_MINUTES: z.coerce.number().int().positive().max(30).default(10),
+
   TEACHER_INVITATION_BASE_URL: z
     .string()
     .url()

@@ -81,7 +81,7 @@ export async function updateStaffController(req, res, next) {
 
     res.json({
       success: true,
-      message: 'Staff account updated successfully.',
+      message: 'User account updated successfully.',
       data: user
     });
   } catch (error) {
