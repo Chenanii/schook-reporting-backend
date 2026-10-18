@@ -13,7 +13,7 @@ import {
 
 export const subjectsRouter = Router();
 
-subjectsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
+subjectsRouter.use(authenticate, requireActiveSubscription, authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'));
 
 subjectsRouter.post('/', createSubjectController);
 subjectsRouter.get('/', listSubjectsController);

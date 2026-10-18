@@ -29,8 +29,8 @@ promotionRouter.use(
 );
 
 promotionRouter.get('/preview', previewPromotionController);
-promotionRouter.get('/policies', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), listPromotionPoliciesController);
-promotionRouter.put('/policies/:classLevelId', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), savePromotionPolicyController);
+promotionRouter.get('/policies', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER','ACADEMIC_ADMIN'), listPromotionPoliciesController);
+promotionRouter.put('/policies/:classLevelId', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER','ACADEMIC_ADMIN'), savePromotionPolicyController);
 promotionRouter.post('/approve', approvePromotionController);
 promotionRouter.get('/batches', listPromotionBatchesController);
 promotionRouter.get('/batches/:id', getPromotionBatchByIdController);
