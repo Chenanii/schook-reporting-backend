@@ -135,9 +135,36 @@ model School {
   subscriptions        SchoolSubscription[]
   promotionPolicies    PromotionPolicy[]
   notifications        Notification[]
+  theme SchoolTheme?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model SchoolTheme {
+  id       String @id @default(cuid())
+  schoolId String @unique
+
+  // Brand colors
+  primaryColor   String @default("#216b49")
+  secondaryColor String @default("#287b59")
+  accentColor    String @default("#eaf3ec")
+
+  // Interface colors
+  pageBackground String @default("#f4f6f5")
+  surfaceColor   String @default("#ffffff")
+  textColor      String @default("#1c2821")
+  mutedTextColor String @default("#59665e")
+  borderColor    String @default("#dfe5e0")
+
+  // Appearance
+  mode       String @default("LIGHT")
+  fontFamily String @default("Inter")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 }
 
 model SubscriptionPlan {

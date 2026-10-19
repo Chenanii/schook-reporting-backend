@@ -30,6 +30,7 @@ import { auditLogsRouter } from './modules/audit-logs/audit-logs.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { parentPortalRouter } from './modules/parent-portal/parent-portal.routes.js';
 import { midTermReportCardsRouter } from './modules/mid-term-report-cards/mid-term-report-cards.routes.js';
+import { schoolThemesRouter } from './modules/school-themes/school-themes.routes.js';
 
 export const app = express();
 
@@ -71,6 +72,7 @@ app.use(`${env.API_PREFIX}/audit-logs`, auditLogsRouter);
 app.use(`${env.API_PREFIX}/notifications`, notificationsRouter);
 app.use(`${env.API_PREFIX}/parent-portal`, parentPortalRouter);
 app.use(`${env.API_PREFIX}/mid-term-report-cards`, midTermReportCardsRouter);
+app.use(`${env.API_PREFIX}/school-themes`, schoolThemesRouter);
 
 app.get('/', (req, res) => {
   res.json({

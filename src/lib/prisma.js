@@ -7,7 +7,7 @@ const tenantModels = new Set([
   'GradeBoundary', 'ClassLevel', 'ClassGroup', 'Subject', 'ClassSubject',
   'TeachingAssignment', 'Enrollment', 'Assessment', 'AssessmentResult',
   'TermSubjectResult', 'AnnualSubjectResult', 'AnnualResultTerm', 'AuditLog',
-  'PromotionBatch', 'PromotionPolicy'
+  'PromotionBatch', 'PromotionPolicy', 'SchoolTheme'
 ]);
 
 function addSchoolId(data, schoolId) {
