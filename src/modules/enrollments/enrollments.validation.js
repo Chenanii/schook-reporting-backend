@@ -32,6 +32,8 @@ export const listEnrollmentsSchema = z.object({
   studentId: z.string().trim().optional(),
   termId: z.string().trim().optional(),
   classGroupId: z.string().trim().optional(),
+  classLevelId: z.string().trim().optional(),
+  unassigned: z.enum(['true', 'false']).transform((value) => value === 'true').optional().default(false),
   status: enrollmentStatus.optional(),
   search: z.string().trim().max(100).optional()
 });
@@ -43,6 +45,15 @@ export const updateEnrollmentStatusSchema = z.object({
 export const updateEnrollmentClassGroupSchema = z.object({
   classGroupId: z.string().trim().min(1, 'Class group is required.'),
 }).strict();
+
+export const assignClassGroupBulkSchema = z.object({
+  termId: z.string().trim().min(1, 'Academic term is required.'),
+  classGroupId: z.string().trim().min(1, 'Class group is required.'),
+  enrollmentIds: z.array(z.string().trim().min(1)).min(1).max(500)
+}).strict().refine(
+  ({ enrollmentIds }) => new Set(enrollmentIds).size === enrollmentIds.length,
+  { message: 'An enrollment can only be selected once.', path: ['enrollmentIds'] }
+);
 
 export const bulkEnrollmentPreviewSchema = z.object(
   bulkEnrollmentFields

@@ -177,7 +177,7 @@ export async function getReportCardPreview(enrollmentId, teacherUserId = null) {
   return reportCard;
 }
 
-export async function getClassGroupReportCards({ termId, classGroupId, schoolId, teacherUserId = null }) {
+export async function getClassGroupReportCards({ termId, classGroupId, schoolId, teacherUserId = null, allowIncomplete = false }) {
   const [classGroup, term] = await Promise.all([
     prisma.classGroup.findFirst({ where: { id: classGroupId, schoolId }, select: { classLevelId: true } }),
     prisma.term.findFirst({ where: { id: termId, schoolId }, select: { id: true } }),
@@ -221,6 +221,6 @@ export async function getClassGroupReportCards({ termId, classGroupId, schoolId,
   const reportCards = await Promise.all(enrollments.map(async (enrollment) => (
     reportCardForEnrollment(enrollment, await getRequiredSubjects(enrollment), gradeScale.maxScore, school)
   )));
-  ensureResultsPublished(reportCards);
+  if (!allowIncomplete) ensureResultsPublished(reportCards);
   return reportCards;
 }

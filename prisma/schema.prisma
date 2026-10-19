@@ -48,6 +48,13 @@ enum EnrollmentStatus {
   GRADUATED
 }
 
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
 enum AssessmentStatus {
   DRAFT
   OPEN
@@ -123,6 +130,8 @@ model School {
   subjectStreams       SubjectStream[]
   classSubjects        ClassSubject[]
   teachingAssignments  TeachingAssignment[]
+  formTutorAssignments FormTutorAssignment[]
+  attendanceSessions   AttendanceSession[]
   enrollments          Enrollment[]
   enrollmentSubjectStreams EnrollmentSubjectStream[]
   assessments          Assessment[]
@@ -234,6 +243,7 @@ model User {
   promotionBatchesCreated  PromotionBatch[] @relation("PromotionBatchCreatedBy")
   promotionBatchesApproved PromotionBatch[] @relation("PromotionBatchApprovedBy")
   notifications             Notification[]
+  attendanceSessions        AttendanceSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -256,6 +266,7 @@ model Teacher {
 
   user        User?                @relation(fields: [userId], references: [id], onDelete: Restrict)
   assignments TeachingAssignment[]
+  formTutorAssignments FormTutorAssignment[]
   invitations TeacherInvitation[]
 
   createdAt DateTime @default(now())
@@ -395,6 +406,7 @@ model AcademicYear {
   school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   terms         Term[]
+  formTutorAssignments FormTutorAssignment[]
   annualResults AnnualSubjectResult[]
 
   createdAt DateTime @default(now())
@@ -422,6 +434,7 @@ model Term {
 
   enrollments Enrollment[]
   assignments TeachingAssignment[]
+  attendanceSessions AttendanceSession[]
   subjectStreams SubjectStream[]
   assessments Assessment[]
 
@@ -518,6 +531,8 @@ model ClassGroup {
   classLevel       ClassLevel           @relation(fields: [classLevelId], references: [id], onDelete: Restrict)
   enrollments      Enrollment[]
   assignments      TeachingAssignment[]
+  formTutorAssignments FormTutorAssignment[]
+  attendanceSessions AttendanceSession[]
   promotionBatches PromotionBatch[]
 
   createdAt DateTime @default(now())
@@ -637,6 +652,65 @@ model TeachingAssignment {
   @@index([schoolId])
 }
 
+model FormTutorAssignment {
+  id             String @id @default(cuid())
+  teacherId      String
+  classGroupId   String
+  academicYearId String
+  schoolId       String
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  teacher      Teacher      @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  classGroup   ClassGroup   @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([classGroupId, academicYearId])
+  @@index([teacherId, academicYearId])
+  @@index([schoolId])
+}
+
+model AttendanceSession {
+  id           String   @id @default(cuid())
+  classGroupId String
+  termId       String
+  date         DateTime @db.Date
+  takenById    String
+  schoolId     String
+
+  school     School       @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  classGroup ClassGroup   @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  term       Term         @relation(fields: [termId], references: [id], onDelete: Restrict)
+  takenBy    User         @relation(fields: [takenById], references: [id], onDelete: Restrict)
+  records    AttendanceRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([classGroupId, termId, date])
+  @@index([termId, date])
+  @@index([schoolId])
+}
+
+model AttendanceRecord {
+  id                  String           @id @default(cuid())
+  attendanceSessionId String
+  enrollmentId        String
+  status              AttendanceStatus
+  note                String?
+
+  attendanceSession AttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Cascade)
+  enrollment        Enrollment        @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([attendanceSessionId, enrollmentId])
+  @@index([enrollmentId])
+}
+
 // ============================================================
 // STUDENT ENROLMENTS AND PROGRESSION
 // ============================================================
@@ -664,6 +738,7 @@ model Enrollment {
   results     AssessmentResult[]
   termResults TermSubjectResult[]
   subjectStreams EnrollmentSubjectStream[]
+  attendanceRecords AttendanceRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

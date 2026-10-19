@@ -13,7 +13,8 @@ import {
   previewBulkEnrollmentController,
   createBulkEnrollmentsController,
   previewSelectedBulkEnrollmentController,
-  createSelectedBulkEnrollmentsController
+  createSelectedBulkEnrollmentsController,
+  assignClassGroupBulkController
 } from './enrollments.controller.js';
 
 export const enrollmentsRouter = Router();
@@ -26,6 +27,7 @@ enrollmentsRouter.post('/bulk/preview', previewBulkEnrollmentController);
 enrollmentsRouter.post('/bulk', createBulkEnrollmentsController);
 enrollmentsRouter.post('/bulk/selected/preview', previewSelectedBulkEnrollmentController);
 enrollmentsRouter.post('/bulk/selected', createSelectedBulkEnrollmentsController);
+enrollmentsRouter.post('/assign-class-group', assignClassGroupBulkController);
 enrollmentsRouter.post('/', createEnrollmentController);
 enrollmentsRouter.patch('/:id/status', updateEnrollmentStatusController);
 enrollmentsRouter.patch('/:id/class-group', updateEnrollmentClassGroupController);

@@ -13,6 +13,8 @@ import {
   updateTeachingAssignment,
   deleteTeachingAssignment
 } from './teaching-assignments.service.js';
+import { listFormTutorAssignments, saveFormTutorAssignment } from './form-tutors.service.js';
+import { listFormTutorAssignmentsSchema, saveFormTutorAssignmentSchema } from './teaching-assignments.validation.js';
 
 function validationError(res, error) {
   return res.status(400).json({
@@ -23,6 +25,28 @@ function validationError(res, error) {
       details: error.issues
     }
   });
+}
+
+export async function listFormTutorAssignmentsController(req, res, next) {
+  try {
+    const parsed = listFormTutorAssignmentsSchema.safeParse(req.query);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const data = await listFormTutorAssignments(parsed.data.academicYearId, req.schoolId);
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function saveFormTutorAssignmentController(req, res, next) {
+  try {
+    const parsed = saveFormTutorAssignmentSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const data = await saveFormTutorAssignment(parsed.data, req.user.id, req, req.schoolId);
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
 }
 
 export async function createTeachingAssignmentController(req, res, next) {

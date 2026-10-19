@@ -400,7 +400,18 @@ export async function getMidTermReportCardPreview(enrollmentId, {
       },
       select: { id: true },
     });
-    if (!assignment) {
+    const formTutorAssignment = !assignment && enrollment.classGroupId
+      ? await prisma.formTutorAssignment.findFirst({
+          where: {
+            classGroupId: enrollment.classGroupId,
+            academicYearId: enrollment.term.academicYearId,
+            schoolId,
+            teacher: { userId: teacherUserId },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!assignment && !formTutorAssignment) {
       throw httpError(403, 'REPORT_CARD_ACCESS_DENIED', 'You are not assigned to this class group for the selected term.');
     }
   }
@@ -423,7 +434,7 @@ export async function getClassGroupMidTermReportCards({
 }) {
   const [classGroup, term] = await Promise.all([
     prisma.classGroup.findFirst({ where: { id: classGroupId, schoolId }, select: { classLevelId: true } }),
-    prisma.term.findFirst({ where: { id: termId, schoolId }, select: { id: true } }),
+    prisma.term.findFirst({ where: { id: termId, schoolId }, select: { id: true, academicYearId: true } }),
   ]);
   if (!classGroup || !term) {
     throw httpError(404, 'CLASS_GROUP_TERM_NOT_FOUND', 'The selected term or class group was not found.');
@@ -454,7 +465,18 @@ export async function getClassGroupMidTermReportCards({
       },
       select: { id: true },
     });
-    if (!assignment) {
+    const formTutorAssignment = !assignment
+      ? await prisma.formTutorAssignment.findFirst({
+          where: {
+            classGroupId,
+            academicYearId: term.academicYearId,
+            schoolId,
+            teacher: { userId: teacherUserId },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!assignment && !formTutorAssignment) {
       throw httpError(403, 'REPORT_CARD_ACCESS_DENIED', 'You are not assigned to this class group for the selected term.');
     }
   }

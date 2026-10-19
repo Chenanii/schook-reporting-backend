@@ -18,6 +18,7 @@ import { classSubjectsRouter } from './modules/class-subjects/class-subjects.rou
 import { teachingAssignmentsRouter } from './modules/teaching-assignments/teaching-assignments.routes.js';
 import { teachersRouter } from './modules/teachers/teachers.routes.js';
 import { studentsRouter } from './modules/students/students.routes.js';
+import { attendanceRouter } from './modules/attendance/attendance.routes.js';
 import { enrollmentsRouter } from './modules/enrollments/enrollments.routes.js';
 import { assessmentsRouter } from './modules/assessments/assessments.routes.js';
 import { termResultsRouter } from './modules/term-results/term-results.routes.js';
@@ -61,6 +62,7 @@ app.use(`${env.API_PREFIX}/class-subjects`, classSubjectsRouter);
 app.use(`${env.API_PREFIX}/teaching-assignments`, teachingAssignmentsRouter);
 app.use(`${env.API_PREFIX}/teachers`, teachersRouter);
 app.use(`${env.API_PREFIX}/students`, studentsRouter);
+app.use(`${env.API_PREFIX}/attendance`, attendanceRouter);
 app.use(`${env.API_PREFIX}/enrollments`, enrollmentsRouter);
 app.use(`${env.API_PREFIX}/assessments`, assessmentsRouter);
 app.use(`${env.API_PREFIX}/term-results`, termResultsRouter);

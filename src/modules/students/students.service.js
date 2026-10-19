@@ -167,23 +167,25 @@ export async function createStudent(data, actorId, req, schoolId) {
 }
 
 export async function listStudents(filters, teacherUserId = null) {
-  const { page, limit, search, status, excludeEnrolledTermId } = filters;
+  const { page, limit, search, status, academicYearId, classLevelId, classGroupId, excludeEnrolledTermId } = filters;
+  const teacherEnrollmentScope = [
+    { classGroup: { assignments: { some: { teacher: { userId: teacherUserId } } } } },
+    { classGroup: { formTutorAssignments: { some: { teacher: { userId: teacherUserId } } } } },
+    { subjectStreams: { some: { status: 'ACTIVE', subjectStream: { teachingAssignments: { some: { teacher: { userId: teacherUserId } } } } } } }
+  ];
+  const enrollmentCriteria = {
+    ...(classLevelId ? { classLevelId } : {}),
+    ...(classGroupId ? { classGroupId } : {}),
+    ...(academicYearId ? { term: { academicYearId } } : {}),
+    ...(teacherUserId ? { OR: teacherEnrollmentScope } : {})
+  };
 
   const where = {
-    ...(teacherUserId || excludeEnrolledTermId
+    ...(teacherUserId || excludeEnrolledTermId || academicYearId || classLevelId || classGroupId
       ? {
           enrollments: {
-            ...(teacherUserId
-              ? {
-                  some: {
-                    OR: [
-                      { classGroup: { assignments: { some: { teacher: { userId: teacherUserId } } } } },
-                      { subjectStreams: { some: { status: 'ACTIVE', subjectStream: { teachingAssignments: { some: { teacher: { userId: teacherUserId } } } } } } }
-                    ]
-                  },
-                }
-              : {}),
-            ...(excludeEnrolledTermId ? { none: { termId: excludeEnrolledTermId } } : {}),
+            ...(teacherUserId || academicYearId || classLevelId || classGroupId ? { some: enrollmentCriteria } : {}),
+            ...(excludeEnrolledTermId ? { none: { termId: excludeEnrolledTermId } } : {})
           },
         }
       : {}),
@@ -229,7 +231,26 @@ export async function listStudents(filters, teacherUserId = null) {
         { lastName: 'asc' },
         { firstName: 'asc' }
       ],
-      include: studentIncludes
+      include: {
+        ...studentIncludes,
+        enrollments: {
+          where: enrollmentCriteria,
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            classLevel: { select: { id: true, name: true, levelOrder: true } },
+            classGroup: { select: { id: true, name: true } },
+            term: { select: { id: true, name: true, academicYear: { select: { id: true, name: true, isCurrent: true } } } }
+          }
+        },
+        parents: {
+          orderBy: { isPrimary: 'desc' },
+          take: 1,
+          select: { parent: { select: { phone: true } } }
+        }
+      }
     }),
     prisma.student.count({ where })
   ]);

@@ -59,3 +59,13 @@ export const listTeachingAssignmentsSchema = z.object({
 export const teachingAssignmentIdSchema = z.object({
   id: idSchema
 });
+
+export const listFormTutorAssignmentsSchema = z.object({
+  academicYearId: idSchema
+}).strict();
+
+export const saveFormTutorAssignmentSchema = z.object({
+  academicYearId: idSchema,
+  classGroupId: idSchema,
+  teacherId: idSchema.nullable()
+}).strict();

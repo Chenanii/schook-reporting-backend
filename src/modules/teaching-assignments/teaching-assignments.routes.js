@@ -9,7 +9,9 @@ import {
   listTeachingAssignmentsController,
   getTeachingAssignmentController,
   updateTeachingAssignmentController,
-  deleteTeachingAssignmentController
+  deleteTeachingAssignmentController,
+  listFormTutorAssignmentsController,
+  saveFormTutorAssignmentController
 } from './teaching-assignments.controller.js';
 import {
   getStudentStreamRosterController,
@@ -30,6 +32,8 @@ teachingAssignmentsRouter.get(
 );
 
 teachingAssignmentsRouter.use(authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'));
+teachingAssignmentsRouter.get('/form-tutors', listFormTutorAssignmentsController);
+teachingAssignmentsRouter.put('/form-tutors', saveFormTutorAssignmentController);
 teachingAssignmentsRouter.get('/:assignmentId/student-streams', getStudentStreamRosterController);
 teachingAssignmentsRouter.put('/:assignmentId/student-streams', saveStudentStreamRosterController);
 teachingAssignmentsRouter.post('/', createTeachingAssignmentController);
