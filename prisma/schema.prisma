@@ -76,10 +76,16 @@ enum ReportStatus {
   PUBLISHED
 }
 
+enum ReportPublicationType {
+  MID_TERM
+  END_OF_TERM
+}
+
 enum NotificationType {
   ASSESSMENT_OPENED
   ASSESSMENT_SUBMITTED
   TERM_RESULT_PUBLISHED
+  MID_TERM_REPORT_PUBLISHED
 }
 
 enum SchoolStatus {
@@ -144,6 +150,7 @@ model School {
   subscriptions        SchoolSubscription[]
   promotionPolicies    PromotionPolicy[]
   notifications        Notification[]
+  reportPublications   ReportPublication[]
   theme SchoolTheme?
 
   createdAt DateTime @default(now())
@@ -244,6 +251,8 @@ model User {
   promotionBatchesApproved PromotionBatch[] @relation("PromotionBatchApprovedBy")
   notifications             Notification[]
   attendanceSessions        AttendanceSession[]
+  passwordResetTokens       PasswordResetToken[]
+  publishedReports          ReportPublication[] @relation("ReportPublisher")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,6 +260,19 @@ model User {
   @@index([role, status])
   @@index([lastName, firstName])
   @@index([schoolId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model Teacher {
@@ -443,6 +465,7 @@ model Term {
 
   promotionBatchesFrom PromotionBatch[] @relation("PromotionBatchSourceTerm")
   promotionBatchesTo   PromotionBatch[] @relation("PromotionBatchDestinationTerm")
+  reportPublications   ReportPublication[]
 
   @@unique([academicYearId, sequence])
   @@unique([academicYearId, name])
@@ -534,6 +557,7 @@ model ClassGroup {
   formTutorAssignments FormTutorAssignment[]
   attendanceSessions AttendanceSession[]
   promotionBatches PromotionBatch[]
+  reportPublications ReportPublication[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -541,6 +565,27 @@ model ClassGroup {
   @@unique([classLevelId, name])
   @@index([classLevelId])
   @@index([schoolId])
+}
+
+model ReportPublication {
+  id            String               @id @default(cuid())
+  type          ReportPublicationType
+  termId        String
+  classGroupId  String
+  schoolId      String
+  publishedById String
+  publishedAt   DateTime             @default(now())
+
+  term        Term      @relation(fields: [termId], references: [id], onDelete: Restrict)
+  classGroup  ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  school      School    @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  publishedBy User      @relation("ReportPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([termId, classGroupId, type])
+  @@index([schoolId, type, publishedAt])
 }
 
 model Subject {

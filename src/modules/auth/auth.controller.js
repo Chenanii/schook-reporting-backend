@@ -1,12 +1,16 @@
 import {
   loginSchema,
-  changePasswordSchema
+  changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
 } from './auth.validation.js';
 
 import {
   login,
   getCurrentUser,
-  changePassword
+  changePassword,
+  requestPasswordReset,
+  resetPassword
 } from './auth.service.js';
 
 function validate(schema, body, res) {
@@ -66,5 +70,27 @@ export async function changePasswordController(req, res, next) {
     res.json({ success: true, data });
   } catch (error) {
     next(error);
+  }
+}
+
+export async function forgotPasswordController(req, res, next) {
+  try {
+    const input = validate(forgotPasswordSchema, req.body, res);
+    if (!input) return;
+    const data = await requestPasswordReset(input.email);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function resetPasswordController(req, res, next) {
+  try {
+    const input = validate(resetPasswordSchema, req.body, res);
+    if (!input) return;
+    const data = await resetPassword(input);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return next(error);
   }
 }

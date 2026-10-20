@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 import {
   listNotificationsController,
   markAllNotificationsReadController,
@@ -10,6 +11,7 @@ import {
 export const notificationsRouter = Router();
 
 notificationsRouter.use(authenticate);
+notificationsRouter.use(requireActiveSubscription);
 notificationsRouter.use(authorize(
   'SUPER_ADMIN',
   'SCHOOL_ADMIN',

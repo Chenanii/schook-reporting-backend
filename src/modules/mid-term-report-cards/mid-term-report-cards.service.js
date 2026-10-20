@@ -1,24 +1,20 @@
 import { prisma } from '../../lib/prisma.js';
 import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
 import { shouldIncludeReportSubject } from '../class-subjects/subject-requirements.js';
+import { createNotifications, getStudentAndParentUserIds } from '../notifications/notifications.service.js';
 
 /* -------------------------------------------------------------------------- */
 /* Policy                                                                     */
 /* -------------------------------------------------------------------------- */
 
-// Every subject needs at least this many continuous assessments plus the mid-term exam.
-// The subject grade is the plain average of ALL scored assessments, mid-term exam included.
+// Every subject needs at least this many coursework assessments plus the mid-term exam.
+// The mid-term grade is the plain average of coursework and mid-term exam percentages.
 export const MID_TERM_POLICY = Object.freeze({
   minContinuousAssessments: 2,
 });
 
-// An assessment only counts once it has been approved and locked. Any assessment
-// in the term that is not LOCKED blocks the report until it is.
+// Coursework and mid-term exams only count once approved and locked.
 const LOCKED_ASSESSMENT_STATUS = 'LOCKED';
-
-// Assessment.assessmentType is a free string, so match it after normalising
-// (e.g. "MID_TERM", "Mid-Term Exam", "midterm" all match).
-const MID_TERM_EXAM_TYPES = new Set(['MID_TERM_EXAM']);
 
 const MAX_ERROR_DETAILS = 10;
 
@@ -35,7 +31,13 @@ function httpError(statusCode, code, message) {
 
 function isMidTermExam(assessmentType) {
   const normalized = String(assessmentType ?? '').toUpperCase().replace(/[^A-Z]/g, '');
-  return MID_TERM_EXAM_TYPES.has(normalized);
+  // Assessment types are stored as free strings and older records may use
+  // labels such as MID_TERM_EXAMINATION or MIDTERM TEST.
+  return normalized.includes('MIDTERM');
+}
+
+function isContinuousAssessment(assessmentType) {
+  return String(assessmentType ?? '').toUpperCase().replace(/[^A-Z]/g, '') === 'COURSEWORK';
 }
 
 function roundTo(value, places = 2) {
@@ -110,6 +112,7 @@ function assessmentLine(result) {
     title: assessment.title,
     assessmentType: assessment.assessmentType,
     isMidTermExam: isMidTermExam(assessment.assessmentType),
+    isContinuousAssessment: isContinuousAssessment(assessment.assessmentType),
     assessmentStatus: assessment.status,
     locked: assessment.status === LOCKED_ASSESSMENT_STATUS,
     maxMark,
@@ -125,9 +128,10 @@ function buildSubjectMidTerm({ subjectId, subject }, results, boundaries, scoreO
   const lines = results
     .map(assessmentLine)
     .sort((a, b) => a.title.localeCompare(b.title));
-  const lockedLines = lines.filter((line) => line.locked);
-  const unlockedCount = lines.length - lockedLines.length;
-  const continuous = lockedLines.filter((line) => !line.isMidTermExam);
+  const reportableLines = lines.filter((line) => line.isContinuousAssessment || line.isMidTermExam);
+  const lockedLines = reportableLines.filter((line) => line.locked);
+  const unlockedCount = reportableLines.length - lockedLines.length;
+  const continuous = lockedLines.filter((line) => line.isContinuousAssessment);
   const exams = lockedLines.filter((line) => line.isMidTermExam);
 
   const issues = [];
@@ -141,7 +145,7 @@ function buildSubjectMidTerm({ subjectId, subject }, results, boundaries, scoreO
   if (recordedContinuous < MID_TERM_POLICY.minContinuousAssessments) {
     issues.push({
       code: 'CONTINUOUS_ASSESSMENTS_MISSING',
-      message: `${recordedContinuous} of ${MID_TERM_POLICY.minContinuousAssessments} required assessments`,
+      message: `Only ${recordedContinuous} of ${MID_TERM_POLICY.minContinuousAssessments} required coursework assessments have recorded results`,
     });
   }
   if (exams.length === 0) {
@@ -150,12 +154,20 @@ function buildSubjectMidTerm({ subjectId, subject }, results, boundaries, scoreO
     issues.push({ code: 'MID_TERM_EXAM_NOT_ENTERED', message: 'mid-term exam not entered' });
   }
 
-  const scoredPercents = (list) => list.filter((l) => l.percent !== null).map((l) => l.percent);
-  const continuousPercent = averageOf(scoredPercents(continuous));
-  const examPercent = averageOf(scoredPercents(exams));
+  // Absence counts as zero, matching term-result calculations. Exempt results
+  // do not contribute a score to the average.
+  const averageablePercents = (list) => list
+    .map((line) => (line.status === 'ABSENT' ? 0 : line.percent))
+    .filter((percent) => percent !== null);
+  const continuousPercent = averageOf(averageablePercents(continuous));
+  const examPercent = averageOf(averageablePercents(exams));
 
-  // Grade = average of every scored locked assessment, the mid-term exam included.
-  const averagePercent = averageOf(scoredPercents(lockedLines));
+  // Treat coursework and mid-term exams as two equally weighted components:
+  // average all coursework first, average mid-term exams, then average those
+  // component averages. This prevents a subject with more coursework entries
+  // from outweighing its mid-term exam.
+  const componentAverages = [continuousPercent, examPercent].filter((value) => value !== null);
+  const averagePercent = averageOf(componentAverages);
   const boundary = averagePercent === null ? null : gradeFor(boundaries, averagePercent);
   if (!boundary) {
     issues.push({ code: 'GRADE_MISSING', message: 'no grade could be calculated' });
@@ -181,7 +193,9 @@ function buildSubjectMidTerm({ subjectId, subject }, results, boundaries, scoreO
       absent: exams.length > 0 && exams.every((line) => line.status === 'ABSENT'),
     },
     averagePercent: averagePercent === null ? null : roundTo(averagePercent),
-    finalMark: averagePercent === null ? null : roundTo((averagePercent / 100) * scoreOutOf),
+    // Keep marks as percentages, consistent with term report results; the UI
+    // converts this percentage to the configured scoreOutOf scale for display.
+    finalMark: averagePercent === null ? null : roundTo(averagePercent),
     grade: boundary?.grade ?? null,
     gradeDescription: boundary?.description ?? null,
   };
@@ -242,7 +256,7 @@ function midTermReportCardForEnrollment({ enrollment, subjects, resultsBySubject
       completeSubjects: subjectResults.length - incompleteSubjects.length,
       incompleteSubjects: incompleteSubjects.length,
       averagePercent: overallPercent === null ? null : roundTo(overallPercent),
-      averageMark: overallPercent === null ? null : roundTo((overallPercent / 100) * scoreOutOf),
+      averageMark: overallPercent === null ? null : roundTo(overallPercent),
     },
     subjects: subjectResults,
     incompleteSubjects,
@@ -283,7 +297,7 @@ async function loadMidTermContext(enrollments, { termId, schoolId }) {
   const enrollmentIds = enrollments.map((enrollment) => enrollment.id);
   const classLevelIds = [...new Set(enrollments.map((enrollment) => enrollment.classLevelId))];
 
-  const [classSubjects, streamSelections, results] = await Promise.all([
+  const [classSubjects, streamSelections, assessments] = await Promise.all([
     prisma.classSubject.findMany({
       where: { classLevelId: { in: classLevelIds }, schoolId, isRequired: true, subject: { status: 'ACTIVE' } },
       include: { subject: true },
@@ -296,15 +310,25 @@ async function loadMidTermContext(enrollments, { termId, schoolId }) {
       },
       include: { subjectStream: { include: { subject: true } } },
     }),
-    prisma.assessmentResult.findMany({
-      where: {
-        enrollmentId: { in: enrollmentIds },
-        schoolId,
-        assessment: { termId, schoolId },
-      },
-      include: {
-        assessment: {
-          select: { id: true, title: true, assessmentType: true, maxMark: true, subjectId: true, status: true },
+    prisma.assessment.findMany({
+      where: { termId, schoolId },
+      select: {
+        id: true,
+        title: true,
+        assessmentType: true,
+        maxMark: true,
+        subjectId: true,
+        status: true,
+        teachingAssignment: {
+          select: {
+            classGroupId: true,
+            subjectStreamId: true,
+            classSubject: { select: { classLevelId: true, isRequired: true } },
+          },
+        },
+        results: {
+          where: { enrollmentId: { in: enrollmentIds } },
+          select: { enrollmentId: true, mark: true, status: true, teacherComment: true },
         },
       },
     }),
@@ -325,12 +349,31 @@ async function loadMidTermContext(enrollments, { termId, schoolId }) {
   });
 
   const resultsByEnrollment = new Map();
-  results.forEach((result) => {
-    const bySubject = resultsByEnrollment.get(result.enrollmentId) ?? new Map();
-    const list = bySubject.get(result.assessment.subjectId) ?? [];
-    list.push(result);
-    bySubject.set(result.assessment.subjectId, list);
-    resultsByEnrollment.set(result.enrollmentId, bySubject);
+  assessments.forEach((assessment) => {
+    const assignment = assessment.teachingAssignment;
+    const resultByEnrollmentId = new Map(assessment.results.map((result) => [result.enrollmentId, result]));
+    enrollments.forEach((enrollment) => {
+      const streamSelection = (streamsByEnrollment.get(enrollment.id) ?? [])
+        .some(({ status, subjectStream }) => status === 'ACTIVE' && subjectStream.id === assignment.subjectStreamId);
+      const appliesToEnrollment = assignment.classSubject?.isRequired
+        ? assignment.classSubject.classLevelId === enrollment.classLevelId
+        : assignment.subjectStreamId
+          ? streamSelection
+          : assignment.classGroupId === enrollment.classGroupId;
+      if (!appliesToEnrollment) return;
+
+      const result = resultByEnrollmentId.get(enrollment.id) ?? {
+        enrollmentId: enrollment.id,
+        mark: null,
+        status: 'NOT_ENTERED',
+        teacherComment: null,
+      };
+      const bySubject = resultsByEnrollment.get(enrollment.id) ?? new Map();
+      const list = bySubject.get(assessment.subjectId) ?? [];
+      list.push({ ...result, assessment });
+      bySubject.set(assessment.subjectId, list);
+      resultsByEnrollment.set(enrollment.id, bySubject);
+    });
   });
 
   return { classSubjectsByLevel, streamsByEnrollment, resultsByEnrollment };
@@ -495,4 +538,77 @@ export async function getClassGroupMidTermReportCards({
   });
   if (!allowIncomplete) ensureMidTermComplete(reportCards);
   return reportCards;
+}
+
+export async function getMidTermReportPublication({ termId, classGroupId, schoolId }) {
+  return prisma.reportPublication.findFirst({
+    where: { termId, classGroupId, schoolId, type: 'MID_TERM' },
+    select: { id: true, publishedAt: true, publishedBy: { select: { firstName: true, lastName: true } } },
+  });
+}
+
+export async function publishClassGroupMidTermReports({ termId, classGroupId, schoolId, actorId, req }) {
+  const reportCards = await getClassGroupMidTermReportCards({ termId, classGroupId, schoolId, allowIncomplete: true });
+  if (!reportCards.length) {
+    throw httpError(409, 'MID_TERM_NO_ACTIVE_STUDENTS', 'There are no active student enrollments to publish for this class and term.');
+  }
+  ensureMidTermComplete(reportCards);
+
+  return prisma.$transaction(async (tx) => {
+    const publication = await tx.reportPublication.upsert({
+      where: { termId_classGroupId_type: { termId, classGroupId, type: 'MID_TERM' } },
+      create: { type: 'MID_TERM', termId, classGroupId, schoolId, publishedById: actorId },
+      update: { schoolId, publishedById: actorId, publishedAt: new Date() },
+      select: { id: true, publishedAt: true },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId,
+        action: 'MID_TERM_REPORTS_PUBLISHED',
+        entityType: 'ReportPublication',
+        entityId: publication.id,
+        schoolId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')?.slice(0, 500),
+        newValues: { type: 'MID_TERM', termId, classGroupId, studentCount: reportCards.length },
+      },
+    });
+    const userIds = await getStudentAndParentUserIds(tx, {
+      schoolId,
+      studentIds: reportCards.map(({ student }) => student.id),
+    });
+    const term = reportCards[0].term;
+    await createNotifications(tx, {
+      schoolId,
+      userIds,
+      type: 'MID_TERM_REPORT_PUBLISHED',
+      title: 'Mid-term reports published',
+      message: `Mid-term reports for ${term.name} are now available.`,
+      entityId: publication.id,
+    });
+    return publication;
+  }, { isolationLevel: 'Serializable' });
+}
+
+export async function getParentPublishedMidTermReport(enrollmentId, userId, schoolId) {
+  const enrollment = await prisma.enrollment.findFirst({
+    where: {
+      id: enrollmentId,
+      schoolId,
+      student: { is: { parents: { some: { parent: { userId, schoolId } } } } },
+    },
+    select: { id: true, termId: true, classGroupId: true },
+  });
+  if (!enrollment || !enrollment.classGroupId) {
+    throw httpError(404, 'MID_TERM_REPORT_NOT_AVAILABLE', 'This mid-term report is not available to your parent account.');
+  }
+  const publication = await getMidTermReportPublication({
+    termId: enrollment.termId,
+    classGroupId: enrollment.classGroupId,
+    schoolId,
+  });
+  if (!publication) {
+    throw httpError(404, 'MID_TERM_REPORT_NOT_PUBLISHED', 'The school has not published this mid-term report yet.');
+  }
+  return getMidTermReportCardPreview(enrollmentId, { schoolId });
 }

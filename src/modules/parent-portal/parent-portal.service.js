@@ -6,7 +6,6 @@ function httpError(statusCode, code, message) {
   error.code = code;
   return error;
 }
-
 export async function getParentPortalOverview(userId, schoolId, db = prisma) {
   if (!schoolId) {
     throw httpError(
@@ -47,6 +46,8 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
                   orderBy: [{ createdAt: "desc" }],
                   select: {
                     id: true,
+                    termId: true,
+                    classGroupId: true,
                     status: true,
                     classLevel: { select: { name: true } },
                     classGroup: { select: { name: true } },
@@ -111,6 +112,25 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
       "No students are linked to this parent account.",
     );
 
+  const enrollmentScopes = parentLinks.flatMap(({ students }) => students.flatMap(({ student }) => (
+    student?.enrollments
+      .filter(({ classGroupId }) => classGroupId)
+      .map(({ termId, classGroupId }) => ({ termId, classGroupId })) || []
+  )));
+  const publications = enrollmentScopes.length
+    ? await db.reportPublication.findMany({
+      where: {
+        type: { in: ["MID_TERM", "END_OF_TERM"] },
+        OR: enrollmentScopes,
+      },
+      select: { termId: true, classGroupId: true, type: true, publishedAt: true },
+    })
+    : [];
+  const publicationByScope = new Map(publications.map((publication) => [
+    `${publication.type}:${publication.termId}:${publication.classGroupId}`,
+    publication.publishedAt,
+  ]));
+
   const studentsById = new Map();
   for (const link of parentLinks) {
     for (const parentStudent of link.students) {
@@ -123,6 +143,15 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
         ) ||
         student.enrollments[0] ||
         null;
+      const enrollmentsWithMidTermPublication = student.enrollments.map((enrollment) => ({
+        ...enrollment,
+        midTermPublishedAt: enrollment.classGroupId
+          ? publicationByScope.get(`MID_TERM:${enrollment.termId}:${enrollment.classGroupId}`) ?? null
+          : null,
+        endOfTermPublishedAt: enrollment.classGroupId
+          ? publicationByScope.get(`END_OF_TERM:${enrollment.termId}:${enrollment.classGroupId}`) ?? null
+          : null,
+      }));
       if (!existing) {
         studentsById.set(student.id, {
           id: student.id,
@@ -133,8 +162,10 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
           dateOfBirth: student.dateOfBirth,
           gender: student.gender,
           relationship: parentStudent.relationship,
-          currentEnrollment,
-          enrollments: student.enrollments,
+          currentEnrollment: currentEnrollment
+            ? enrollmentsWithMidTermPublication.find(({ id }) => id === currentEnrollment.id)
+            : null,
+          enrollments: enrollmentsWithMidTermPublication,
           annualResults: student.annualResults,
         });
       }

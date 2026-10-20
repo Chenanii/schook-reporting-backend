@@ -78,7 +78,10 @@ export async function requestParentPortalVerification(rawIdentifier) {
     where: parentContactWhere(identifier),
     select: { id: true, userId: true, schoolId: true },
   });
-  const canRegister = matchingParents.length > 0 && matchingParents.every(({ userId }) => !userId);
+  const matchingSchoolIds = new Set(matchingParents.map(({ schoolId }) => schoolId));
+  const canRegister = matchingParents.length > 0
+    && matchingSchoolIds.size === 1
+    && matchingParents.every(({ userId }) => !userId);
   if (!canRegister) {
     return {
       challengeId,

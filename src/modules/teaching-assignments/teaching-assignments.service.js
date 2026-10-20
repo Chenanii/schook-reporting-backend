@@ -83,7 +83,7 @@ const assignmentInclude = {
     }
   },
   term: {
-    include: { academicYear: { select: { id: true, name: true } } }
+    include: { academicYear: { select: { id: true, name: true, isCurrent: true } } }
   },
   _count: { select: { assessments: true } }
 };

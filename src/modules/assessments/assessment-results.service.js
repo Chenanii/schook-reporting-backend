@@ -32,6 +32,29 @@ function resultSnapshot(result) {
   };
 }
 
+function enrollmentScope(assignment) {
+  if (assignment.classSubject?.isRequired) {
+    const classLevelId = assignment.classSubject.classLevelId
+      ?? assignment.subjectStream?.classLevelId
+      ?? assignment.classGroup?.classLevelId;
+    if (!classLevelId) {
+      throw httpError(409, 'ASSESSMENT_CLASS_LEVEL_UNAVAILABLE', 'The class level for this assessment could not be determined. Update the teaching assignment before entering results.');
+    }
+    return { classLevelId };
+  }
+
+  if (assignment.subjectStreamId) {
+    return {
+      subjectStreams: {
+        some: { subjectStreamId: assignment.subjectStreamId, status: 'ACTIVE' }
+      }
+    };
+  }
+
+  if (assignment.classGroupId) return { classGroupId: assignment.classGroupId };
+  throw httpError(409, 'ASSESSMENT_CLASS_UNAVAILABLE', 'The class for this assessment could not be determined. Update the teaching assignment before entering results.');
+}
+
 export async function getAssessmentResultEntries(assessmentId, teacherUserId = null) {
   const assessment = await prisma.assessment.findFirst({
     where: { id: assessmentId, ...teacherAssessmentScope(teacherUserId) },
@@ -44,7 +67,8 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
           classGroupId: true,
           classSubjectId: true,
           subjectStreamId: true,
-          classSubject: { select: { isRequired: true } },
+          classGroup: { select: { classLevelId: true } },
+          classSubject: { select: { isRequired: true, classLevelId: true } },
           subjectStream: { select: { classLevelId: true } },
         }
       }
@@ -58,15 +82,8 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
   const enrollments = await prisma.enrollment.findMany({
     where: {
       termId: assessment.termId,
-      ...(assessment.teachingAssignment.classSubject?.isRequired
-        ? { classLevelId: assessment.teachingAssignment.subjectStream.classLevelId }
-        : !assessment.teachingAssignment.subjectStreamId
-          ? { classGroupId: assessment.teachingAssignment.classGroupId }
-          : {}),
-      status: 'ACTIVE',
-      ...(!assessment.teachingAssignment.classSubject?.isRequired && assessment.teachingAssignment.subjectStreamId ? {
-        subjectStreams: { some: { subjectStreamId: assessment.teachingAssignment.subjectStreamId, status: 'ACTIVE' } },
-      } : {}),
+      ...enrollmentScope(assessment.teachingAssignment),
+      status: 'ACTIVE'
     },
     select: {
       id: true,
@@ -128,7 +145,8 @@ export async function saveAssessmentResults(
           id: true,
           classSubjectId: true,
           subjectStreamId: true,
-          classSubject: { select: { isRequired: true } },
+          classGroup: { select: { classLevelId: true } },
+          classSubject: { select: { isRequired: true, classLevelId: true } },
           subjectStream: { select: { classLevelId: true } },
         },
       },
@@ -161,14 +179,7 @@ export async function saveAssessmentResults(
     where: {
       id: { in: enrollmentIds },
       termId: assessment.termId,
-      ...(assessment.teachingAssignment.classSubject?.isRequired
-        ? { classLevelId: assessment.teachingAssignment.subjectStream.classLevelId }
-        : !assessment.teachingAssignment.subjectStreamId
-          ? { classGroupId: assessment.teachingAssignment.classGroupId }
-          : {}),
-      ...(!assessment.teachingAssignment.classSubject?.isRequired && assessment.teachingAssignment.subjectStreamId ? {
-        subjectStreams: { some: { subjectStreamId: assessment.teachingAssignment.subjectStreamId, status: 'ACTIVE' } },
-      } : {}),
+      ...enrollmentScope(assessment.teachingAssignment)
     },
     select: {
       id: true,

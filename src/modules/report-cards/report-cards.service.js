@@ -15,20 +15,31 @@ function reportCardForEnrollment(enrollment, requiredSubjects, scoreOutOf, schoo
   );
   const subjects = requiredSubjects.map(({ subjectId, subject }) => {
     const result = publishedResultsBySubject.get(subjectId);
+    const finalMark = result?.finalMark == null ? null : Number(result.finalMark);
+    const grade = result?.grade ?? null;
+    const issue = !result
+      ? 'Result has not been published'
+      : finalMark === null || !Number.isFinite(finalMark)
+        ? 'Published result has no valid final mark'
+        : !grade
+          ? 'Published result has no grade'
+          : null;
     return {
       subjectId,
       subjectCode: subject.code,
       subjectName: subject.name,
       published: Boolean(result),
-      finalMark: result?.finalMark == null ? null : Number(result.finalMark),
-      grade: result?.grade ?? null,
+      finalMark,
+      grade,
+      complete: issue === null,
+      issue,
       gradeDescription: result?.gradeDescription ?? null,
       teacherComment: result?.teacherComment ?? null,
     };
   }).sort((a, b) => a.subjectName.localeCompare(b.subjectName));
   const publishedSubjects = subjects.filter((subject) => subject.published);
-  const missingSubjects = subjects.filter((subject) => !subject.published);
-  const marks = publishedSubjects.map((subject) => subject.finalMark).filter((mark) => mark !== null);
+  const missingSubjects = subjects.filter((subject) => !subject.complete);
+  const marks = subjects.filter((subject) => subject.complete).map((subject) => subject.finalMark);
   const averageMark = marks.length > 0
     ? Number((marks.reduce((total, mark) => total + mark, 0) / marks.length).toFixed(2))
     : null;
@@ -49,7 +60,7 @@ function reportCardForEnrollment(enrollment, requiredSubjects, scoreOutOf, schoo
       averageMark,
     },
     subjects,
-    missingSubjects: missingSubjects.map(({ subjectId, subjectCode, subjectName }) => ({ subjectId, subjectCode, subjectName })),
+    missingSubjects: missingSubjects.map(({ subjectId, subjectCode, subjectName, issue }) => ({ subjectId, subjectCode, subjectName, issue })),
   };
 }
 
@@ -60,13 +71,19 @@ export async function getParentReportCard(enrollmentId, userId, schoolId) {
       schoolId,
       student: { parents: { some: { parent: { userId, schoolId } } } },
     },
-    select: { id: true, term: { select: { status: true } } },
+    select: { id: true, termId: true, classGroupId: true, term: { select: { status: true } } },
   });
   if (!enrollment) {
     throw httpError(404, 'ENROLLMENT_NOT_FOUND', 'This student enrollment is not available to your parent account.');
   }
-  if (!['PUBLISHED', 'CLOSED'].includes(enrollment.term.status)) {
-    throw httpError(409, 'TERM_REPORT_NOT_PUBLISHED', 'The end-of-term report card will be available after the school publishes the term.');
+  const classReportPublication = enrollment.classGroupId
+    ? await prisma.reportPublication.findUnique({
+      where: { termId_classGroupId_type: { termId: enrollment.termId, classGroupId: enrollment.classGroupId, type: 'END_OF_TERM' } },
+      select: { id: true },
+    })
+    : null;
+  if (!classReportPublication && !['PUBLISHED', 'CLOSED'].includes(enrollment.term.status)) {
+    throw httpError(409, 'TERM_REPORT_NOT_PUBLISHED', 'The end-of-term report card will be available after the school publishes results for the class.');
   }
   return getReportCardPreview(enrollment.id);
 }
@@ -89,12 +106,12 @@ function ensureResultsPublished(reportCards) {
           reportCard.student.middleName,
           reportCard.student.lastName,
         ].filter(Boolean).join(' ') || reportCard.student.admissionNumber;
-        return reportCard.missingSubjects.map((subject) => `${studentName}: ${subject.subjectName}`);
+        return reportCard.missingSubjects.map((subject) => `${studentName}: ${subject.subjectName} (${subject.issue})`);
       });
     throw httpError(
       409,
       'REPORT_RESULTS_NOT_PUBLISHED',
-      `Report cards cannot be generated because published results are missing for ${incompleteCount} student${incompleteCount === 1 ? '' : 's'}${missingDetails.length ? ` (${missingDetails.join('; ')})` : ''}. Publish all required subject results in Term results first.`,
+      `Report cards cannot be generated because results are missing or incomplete for ${incompleteCount} student${incompleteCount === 1 ? '' : 's'}${missingDetails.length ? ` (${missingDetails.join('; ')})` : ''}. Publish all required subject results in Term results first and ensure each has a final mark and grade.`,
     );
   }
 }

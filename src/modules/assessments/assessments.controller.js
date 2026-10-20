@@ -9,6 +9,7 @@ import {
   listAssessments,
   getAssessmentById,
   updateAssessment,
+  deleteAssessment,
 } from './assessments.service.js';
 
 function validationError(res, error) {
@@ -92,6 +93,21 @@ export async function updateAssessmentController(req, res) {
   return res.status(200).json({
     success: true,
     message: 'Assessment updated successfully.',
+    data: assessment,
+  });
+}
+
+export async function deleteAssessmentController(req, res) {
+  const assessment = await deleteAssessment(
+    req.params.id,
+    req.user.id,
+    req,
+    req.user.role === 'TEACHER' ? req.user.id : null,
+  );
+
+  return res.status(200).json({
+    success: true,
+    message: 'Draft assessment deleted successfully.',
     data: assessment,
   });
 }

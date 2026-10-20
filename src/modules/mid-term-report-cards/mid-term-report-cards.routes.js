@@ -5,6 +5,7 @@ import { requireActiveSubscription } from '../../middleware/require-active-subsc
 
 import {
   getClassGroupMidTermReportCardsController,
+  publishClassGroupMidTermReportsController,
   getMidTermReportCardPreviewController,
 } from './mid-term-report-cards.controller.js';
 
@@ -32,4 +33,9 @@ midTermReportCardsRouter.get('/enrollments/:enrollmentId', getMidTermReportCardP
 midTermReportCardsRouter.get(
   '/terms/:termId/class-groups/:classGroupId',
   getClassGroupMidTermReportCardsController,
+);
+midTermReportCardsRouter.post(
+  '/terms/:termId/class-groups/:classGroupId/publish',
+  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'),
+  publishClassGroupMidTermReportsController,
 );

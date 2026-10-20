@@ -14,6 +14,16 @@ export const attendanceSheetQuerySchema = z.object({
   date: dateSchema
 }).strict();
 
+export const attendanceReportQuerySchema = z.object({
+  termId: idSchema,
+  classGroupId: idSchema.optional(),
+  studentId: idSchema.optional(),
+  format: z.enum(['pdf', 'excel']).optional()
+}).strict().refine((value) => !(value.classGroupId && value.studentId), {
+  message: 'Choose a class group or an individual student.',
+  path: ['studentId']
+});
+
 export const saveAttendanceSchema = z.object({
   termId: idSchema,
   classGroupId: idSchema,

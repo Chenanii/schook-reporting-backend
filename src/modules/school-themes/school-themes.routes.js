@@ -18,7 +18,17 @@ schoolThemesRouter.use(
 
 schoolThemesRouter.get(
   '/',
-  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'),
+  authorize(
+    'SUPER_ADMIN',
+    'SCHOOL_ADMIN',
+    'HEADTEACHER',
+    'ACADEMIC_ADMIN',
+    'EXAMS_OFFICER',
+    'TEACHER',
+    'FORM_TUTOR',
+    'STUDENT',
+    'PARENT',
+  ),
   getSchoolThemeController
 );
 

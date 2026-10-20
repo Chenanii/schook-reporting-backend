@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
 import { schoolSignupRateLimit } from '../../middleware/school-signup-rate-limit.js';
+import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
+import { schoolSetupStatusController } from './school-setup.controller.js';
 import {
   registerSchoolController, listSchoolsController, updateSchoolStatusController,
   currentSchoolController, updateCurrentSchoolController
@@ -19,6 +21,9 @@ schoolsRouter.get('/current', authenticate, authorize(
   'STUDENT',
   'PARENT',
 ), currentSchoolController);
-schoolsRouter.patch('/current', authenticate, authorize('SCHOOL_ADMIN', 'HEADTEACHER'), updateCurrentSchoolController);
+schoolsRouter.get('/setup-status', authenticate, authorize(
+  'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER', 'TEACHER', 'FORM_TUTOR'
+), schoolSetupStatusController);
+schoolsRouter.patch('/current', authenticate, requireActiveSubscription, authorize('SCHOOL_ADMIN', 'HEADTEACHER'), updateCurrentSchoolController);
 schoolsRouter.get('/', authenticate, authorize('SUPER_ADMIN'), listSchoolsController);
 schoolsRouter.patch('/:id/status', authenticate, authorize('SUPER_ADMIN'), updateSchoolStatusController);

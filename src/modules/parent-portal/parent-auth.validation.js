@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { normalizeParentIdentifier } from './contact.js';
 
 const identifierSchema = z.string().trim().min(3).max(254).refine(
   (value) => value.includes('@')
     ? z.string().email().safeParse(value).success
-    : value.replace(/\D/g, '').length >= 7,
+    : /^[+\d\s().-]+$/.test(value) && normalizeParentIdentifier(value)?.type === 'phone',
   'Enter a valid email address or phone number.',
 );
 

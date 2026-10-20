@@ -1,4 +1,15 @@
 import { prisma } from '../lib/prisma.js';
+import { getSchoolSetupStatus } from '../modules/schools/school-setup.service.js';
+
+const setupPrefixes = new Set([
+  '/academic-years', '/grade-scales', '/terms', '/class-levels',
+  '/class-groups', '/subjects', '/class-subjects', '/teachers', '/students'
+]);
+
+function isSetupRoute(req) {
+  const base = req.baseUrl || '';
+  return [...setupPrefixes].some((prefix) => base === `/api/v1${prefix}` || base.endsWith(prefix));
+}
 
 export async function requireActiveSubscription(req, res, next) {
   try {
@@ -50,12 +61,31 @@ export async function requireActiveSubscription(req, res, next) {
       select: { id: true }
     });
 
-    if (!subscription) {
+    const setupOnlyAccess = !subscription && isSetupRoute(req)
+      ? await prisma.schoolSubscription.findFirst({
+          where: { schoolId, status: 'PENDING_PAYMENT' },
+          select: { id: true }
+        })
+      : null;
+
+    if (!subscription && !setupOnlyAccess) {
       return res.status(402).json({
         success: false,
         error: {
           code: 'SUBSCRIPTION_REQUIRED',
           message: 'An active subscription is required to use school features.'
+        }
+      });
+    }
+
+    const setup = await getSchoolSetupStatus(schoolId);
+    if (!setup.complete && !isSetupRoute(req)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SCHOOL_SETUP_REQUIRED',
+          message: 'Complete the guided school setup before using other school features.',
+          details: setup.steps
         }
       });
     }

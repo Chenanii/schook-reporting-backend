@@ -48,6 +48,7 @@ export async function transitionAssessment(
           classGroupId: true,
           classSubjectId: true,
           subjectStreamId: true,
+          classSubject: { select: { isRequired: true, classLevelId: true } },
         },
       },
     },
@@ -84,37 +85,63 @@ export async function transitionAssessment(
   }
 
   if (targetStatus === 'SUBMITTED') {
+    const assignment = assessment.teachingAssignment;
+    const enrollmentScope = assignment.classSubject?.isRequired
+      ? { classLevelId: assignment.classSubject.classLevelId }
+      : assignment.subjectStreamId
+        ? { subjectStreams: { some: { subjectStreamId: assignment.subjectStreamId, status: 'ACTIVE' } } }
+        : assignment.classGroupId
+          ? { classGroupId: assignment.classGroupId }
+          : null;
+
+    if (!enrollmentScope) {
+      throw httpError(
+        409,
+        'ASSESSMENT_CLASS_UNAVAILABLE',
+        'The class scope for this assessment could not be determined. Update the teaching assignment before submitting.',
+      );
+    }
+
     const activeEnrollments = await prisma.enrollment.findMany({
       where: {
+        schoolId: assessment.schoolId,
         termId: assessment.termId,
-        ...(!assessment.teachingAssignment.subjectStreamId ? { classGroupId: assessment.teachingAssignment.classGroupId } : {}),
+        ...enrollmentScope,
         status: 'ACTIVE',
-        ...(assessment.teachingAssignment.subjectStreamId ? {
-          subjectStreams: { some: { subjectStreamId: assessment.teachingAssignment.subjectStreamId, status: 'ACTIVE' } },
-        } : {}),
       },
       select: { id: true },
     });
+
+    if (activeEnrollments.length === 0) {
+      throw httpError(
+        409,
+        'ASSESSMENT_NO_ACTIVE_ENROLLMENTS',
+        'This assessment cannot be submitted because there are no active student enrollments in its class or subject stream.',
+      );
+    }
 
     const enteredResults = await prisma.assessmentResult.findMany({
       where: {
         assessmentId,
         enrollmentId: { in: activeEnrollments.map((item) => item.id) },
-        status: { in: ['PRESENT', 'ABSENT', 'EXEMPT'] },
       },
-      select: { enrollmentId: true },
+      select: { enrollmentId: true, mark: true, status: true },
     });
 
-    const enteredIds = new Set(enteredResults.map((item) => item.enrollmentId));
-    const missingCount = activeEnrollments.filter(
-      (item) => !enteredIds.has(item.id),
-    ).length;
+    const resultsByEnrollment = new Map(enteredResults.map((result) => [result.enrollmentId, result]));
+    const maxMark = Number(assessment.maxMark);
+    const invalidCount = activeEnrollments.filter(({ id }) => {
+      const result = resultsByEnrollment.get(id);
+      if (!result || result.status !== 'PRESENT' || result.mark === null) return true;
+      const mark = Number(result.mark);
+      return !Number.isFinite(mark) || mark < 0 || mark > maxMark;
+    }).length;
 
-    if (missingCount > 0) {
+    if (invalidCount > 0) {
       throw httpError(
         409,
         'RESULTS_INCOMPLETE',
-        `${missingCount} active enrollment(s) still need a result before submission.`,
+        `Assessment was not submitted to admins: ${invalidCount} active enrollment(s) do not have a valid numeric mark. Every active student must be marked PRESENT with a mark from 0 to ${maxMark}; ABSENT and EXEMPT results do not satisfy this requirement.`,
       );
     }
   }
@@ -195,6 +222,32 @@ export async function resetAssessment(assessmentId, actorId, req) {
     });
     if (!term || !['DRAFT', 'OPEN'].includes(term.status)) {
       throw httpError(409, 'TERM_NOT_EDITABLE', 'Assessments can only be reset while their term is in DRAFT or OPEN status.');
+    }
+
+    const affectedClassGroupIds = assessment.teachingAssignment.classGroupId
+      ? [assessment.teachingAssignment.classGroupId]
+      : assessment.teachingAssignment.subjectStreamId
+        ? [...new Set((await tx.enrollmentSubjectStream.findMany({
+          where: {
+            subjectStreamId: assessment.teachingAssignment.subjectStreamId,
+            status: 'ACTIVE',
+            enrollment: { is: { termId: assessment.termId, status: 'ACTIVE', classGroupId: { not: null } } },
+          },
+          select: { enrollment: { select: { classGroupId: true } } },
+        })).map(({ enrollment }) => enrollment.classGroupId).filter(Boolean))]
+        : [];
+    const publishedMidTermReports = affectedClassGroupIds.length
+      ? await tx.reportPublication.count({
+        where: {
+          type: 'MID_TERM',
+          termId: assessment.termId,
+          classGroupId: { in: affectedClassGroupIds },
+          schoolId: assessment.schoolId,
+        },
+      })
+      : 0;
+    if (publishedMidTermReports > 0) {
+      throw httpError(409, 'MID_TERM_REPORTS_ALREADY_PUBLISHED', 'This assessment cannot be reset after mid-term reports have been published for its class.');
     }
 
     const resultScope = {

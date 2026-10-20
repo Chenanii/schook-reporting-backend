@@ -2,6 +2,8 @@ import { z } from 'zod';
 import {
   getMidTermReportCardPreview,
   getClassGroupMidTermReportCards,
+  getMidTermReportPublication,
+  publishClassGroupMidTermReports,
 } from './mid-term-report-cards.service.js';
 
 const idSchema = z.string().trim().min(1, 'ID is required.');
@@ -63,7 +65,28 @@ export async function getClassGroupMidTermReportCardsController(req, res, next) 
       teacherUserId: restrictedTeacherUserId(req),
       allowIncomplete: query.data.allowIncomplete,
     });
-    return res.status(200).json({ success: true, data });
+    const publication = await getMidTermReportPublication({
+      termId: params.data.termId,
+      classGroupId: params.data.classGroupId,
+      schoolId: req.schoolId,
+    });
+    return res.status(200).json({ success: true, data, publication });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function publishClassGroupMidTermReportsController(req, res, next) {
+  try {
+    const params = classGroupParamsSchema.safeParse(req.params);
+    if (!params.success) return validationError(res, 'A valid term and class group are required.', params.error.issues);
+    const publication = await publishClassGroupMidTermReports({
+      ...params.data,
+      schoolId: req.schoolId,
+      actorId: req.user.id,
+      req,
+    });
+    return res.status(200).json({ success: true, message: 'Mid-term reports published successfully.', data: publication });
   } catch (error) {
     next(error);
   }

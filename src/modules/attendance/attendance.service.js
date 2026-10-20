@@ -14,6 +14,17 @@ function attendanceDate(value) {
   return new Date(`${value}T00:00:00.000Z`);
 }
 
+function currentSchoolDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Blantyre',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 async function loadTerm(termId, schoolId) {
   const term = await prisma.term.findFirst({
     where: { id: termId, schoolId },
@@ -98,7 +109,7 @@ export async function getAttendanceSheet({ termId, classGroupId, date }, user, s
   if (!group) throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
   const assignment = await prisma.formTutorAssignment.findFirst({
     where: { classGroupId, academicYearId: term.academicYearId, schoolId },
-    include: { teacher: { select: { id: true, firstName: true, lastName: true } } }
+    include: { teacher: { select: { id: true, userId: true, firstName: true, lastName: true } } }
   });
   if (!assignment) throw httpError(409, 'FORM_TUTOR_NOT_ASSIGNED', 'This class has no form tutor assigned for the academic year.');
   if (!ADMIN_ROLES.includes(user.role) && assignment.teacherId !== (await prisma.teacher.findFirst({ where: { userId: user.id, schoolId }, select: { id: true } }))?.id) {
@@ -138,6 +149,9 @@ export async function getAttendanceSheet({ termId, classGroupId, date }, user, s
 
 export async function saveAttendance({ termId, classGroupId, date, records }, user, schoolId, req) {
   const term = await loadTerm(termId, schoolId);
+  if (date > currentSchoolDate()) {
+    throw httpError(400, 'FUTURE_ATTENDANCE_DATE', 'Attendance cannot be recorded for a future date.');
+  }
   if (!MARKABLE_TERM_STATUSES.includes(term.status)) {
     throw httpError(409, 'TERM_NOT_OPEN', 'Attendance can only be recorded while the term is open.');
   }
@@ -190,4 +204,59 @@ export async function saveAttendance({ termId, classGroupId, date, records }, us
     } });
     return { id: session.id, date, marked: records.length };
   });
+}
+
+export async function getAttendanceReport({ termId, classGroupId, studentId }, schoolId) {
+  const term = await loadTerm(termId, schoolId);
+  const enrollments = await prisma.enrollment.findMany({
+    where: {
+      schoolId, termId, status: 'ACTIVE',
+      ...(classGroupId ? { classGroupId } : {}),
+      ...(studentId ? { studentId } : {})
+    },
+    include: {
+      student: { select: { id: true, admissionNumber: true, firstName: true, middleName: true, lastName: true } },
+      classLevel: { select: { name: true } },
+      classGroup: { select: { name: true } },
+      attendanceRecords: {
+        where: { attendanceSession: { termId, schoolId } },
+        select: { status: true }
+      }
+    },
+    orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }]
+  });
+  if (classGroupId) {
+    const group = await prisma.classGroup.findFirst({ where: { id: classGroupId, schoolId }, select: { id: true } });
+    if (!group) throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
+  }
+  if (studentId && !enrollments.length) {
+    const student = await prisma.student.findFirst({ where: { id: studentId, schoolId }, select: { id: true } });
+    if (!student) throw httpError(404, 'STUDENT_NOT_FOUND', 'Student not found.');
+  }
+  const classGroups = await prisma.classGroup.findMany({
+    where: { schoolId },
+    include: { classLevel: { select: { name: true } } },
+    orderBy: [{ classLevel: { levelOrder: 'asc' } }, { name: 'asc' }]
+  });
+  return {
+    term: { id: term.id, name: term.name, academicYear: term.academicYear.name },
+    classGroups: classGroups.map((group) => ({ id: group.id, name: group.name, classLevel: group.classLevel.name })),
+    rows: enrollments.map((enrollment) => {
+      const present = enrollment.attendanceRecords.filter(({ status }) => status === 'PRESENT' || status === 'LATE').length;
+      const absent = enrollment.attendanceRecords.filter(({ status }) => status === 'ABSENT').length;
+      const total = present + absent;
+      return {
+        studentId: enrollment.student.id,
+        studentName: [enrollment.student.firstName, enrollment.student.middleName, enrollment.student.lastName].filter(Boolean).join(' '),
+        admissionNumber: enrollment.student.admissionNumber,
+        classLevel: enrollment.classLevel.name,
+        classGroup: enrollment.classGroup?.name ?? '',
+        term: term.name,
+        academicYear: term.academicYear.name,
+        totalDaysPresent: present,
+        totalDaysAbsent: absent,
+        percentageAttendance: total ? Math.round((present / total) * 10000) / 100 : 0
+      };
+    })
+  };
 }

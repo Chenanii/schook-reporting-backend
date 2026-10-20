@@ -50,7 +50,15 @@ async function validateScope(db, { termId, classGroupId, subjectId }) {
   }
 
   const assignments = await db.teachingAssignment.findMany({
-    where: { termId, subjectId, subjectStream: { is: { classLevelId: classGroup.classLevelId } } },
+    where: {
+      termId,
+      subjectId,
+      OR: [
+        { classGroupId: classGroup.id },
+        { subjectStream: { is: { classLevelId: classGroup.classLevelId } } },
+        { classSubject: { is: { classLevelId: classGroup.classLevelId } } },
+      ],
+    },
     select: { subjectStreamId: true },
   });
 
@@ -77,7 +85,7 @@ async function validateScope(db, { termId, classGroupId, subjectId }) {
     classGroup,
     subject,
     isRequired: classSubject?.isRequired === true,
-    streamAssignmentIds: assignments.map(({ subjectStreamId }) => subjectStreamId),
+    streamAssignmentIds: assignments.map(({ subjectStreamId }) => subjectStreamId).filter(Boolean),
   };
 }
 
@@ -397,4 +405,142 @@ export async function publishTermSubjectResults({
 
     return published;
   });
+}
+
+export async function publishClassGroupTermResults({ termId, classGroupId, schoolId, actorId, req }) {
+  return prisma.$transaction(async (tx) => {
+    const [term, classGroup] = await Promise.all([
+      tx.term.findFirst({ where: { id: termId, schoolId }, select: { id: true, name: true, schoolId: true } }),
+      tx.classGroup.findFirst({ where: { id: classGroupId, schoolId }, select: { id: true, classLevelId: true } }),
+    ]);
+    if (!term || !classGroup) throw httpError(404, 'CLASS_GROUP_TERM_NOT_FOUND', 'The selected term or class group was not found.');
+
+    const activeEnrollmentCount = await tx.enrollment.count({ where: { termId, classGroupId, schoolId, status: 'ACTIVE' } });
+    if (!activeEnrollmentCount) throw httpError(409, 'NO_ACTIVE_ENROLLMENTS', 'There are no active student enrollments for this term and class.');
+
+    const [classSubjects, classAssignments] = await Promise.all([
+      tx.classSubject.findMany({ where: { classLevelId: classGroup.classLevelId, schoolId, isRequired: true, subject: { status: 'ACTIVE' } }, select: { subjectId: true } }),
+      tx.teachingAssignment.findMany({
+        where: {
+          termId,
+          schoolId,
+          subject: { status: 'ACTIVE' },
+          OR: [
+            { classGroupId },
+            { subjectStream: { is: { classLevelId: classGroup.classLevelId } } },
+            { classSubject: { is: { classLevelId: classGroup.classLevelId } } },
+          ],
+        },
+        select: { subjectId: true },
+      }),
+    ]);
+    const subjectIds = [...new Set([...classSubjects.map(({ subjectId }) => subjectId), ...classAssignments.map(({ subjectId }) => subjectId)])];
+    if (!subjectIds.length) throw httpError(409, 'NO_RESULTS_TO_PUBLISH', 'No subjects are configured for this class and term.');
+
+    const toPublish = [];
+    const issues = [];
+    const affectedStudentIds = new Set();
+    let validResultCount = 0;
+    for (const subjectId of subjectIds) {
+      const scope = await validateScope(tx, { termId, classGroupId, subjectId });
+      let enrollments;
+      try {
+        enrollments = await getActiveEnrollments(tx, {
+          termId,
+          classGroupId,
+          isRequired: scope.isRequired,
+          streamAssignmentIds: scope.streamAssignmentIds,
+        });
+      } catch (error) {
+        if (error.code === 'NO_ACTIVE_ENROLLMENTS') continue;
+        throw error;
+      }
+      const results = await getScopedResults(tx, {
+        termId,
+        classGroupId,
+        subjectId,
+        isRequired: scope.isRequired,
+        streamAssignmentIds: scope.streamAssignmentIds,
+      });
+      const resultByEnrollmentId = new Map(results.map((result) => [result.enrollmentId, result]));
+      for (const enrollment of enrollments) {
+        const result = resultByEnrollmentId.get(enrollment.id);
+        const studentName = [enrollment.student.firstName, enrollment.student.middleName, enrollment.student.lastName].filter(Boolean).join(' ') || enrollment.student.admissionNumber;
+        if (!result) issues.push(`${studentName}: ${scope.subject.name} (not calculated)`);
+        else if (!['FINALIZED', 'PUBLISHED'].includes(result.status)) issues.push(`${studentName}: ${scope.subject.name} (not finalized)`);
+        else if (result.finalMark === null || !result.grade) issues.push(`${studentName}: ${scope.subject.name} (missing final mark or grade)`);
+        else {
+          validResultCount += 1;
+          affectedStudentIds.add(result.enrollment.studentId);
+          if (result.status === 'FINALIZED') toPublish.push(result);
+        }
+      }
+    }
+    if (issues.length) {
+      const shown = issues.slice(0, 12);
+      const hidden = issues.length - shown.length;
+      throw httpError(409, 'CLASS_RESULTS_NOT_READY', `Class results were not published. Resolve these items first: ${shown.join('; ')}${hidden > 0 ? `; and ${hidden} more` : ''}.`);
+    }
+    if (!validResultCount) throw httpError(409, 'NO_RESULTS_TO_PUBLISH', 'No active subject results are ready to publish for this class and term.');
+    const existingPublication = await tx.reportPublication.findUnique({
+      where: { termId_classGroupId_type: { termId, classGroupId, type: 'END_OF_TERM' } },
+      select: { id: true, publishedAt: true },
+    });
+    if (!toPublish.length && existingPublication) {
+      return { count: 0, subjectCount: subjectIds.length, alreadyPublished: true, publishedAt: existingPublication.publishedAt };
+    }
+
+    const publishedAt = new Date();
+    const published = [];
+    for (const result of toPublish) {
+      const updated = await tx.termSubjectResult.update({
+        where: { id: result.id },
+        data: { status: 'PUBLISHED', publishedAt },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'TERM_SUBJECT_RESULT_PUBLISHED',
+          entityType: 'TermSubjectResult',
+          entityId: result.id,
+          oldValues: snapshot(result),
+          newValues: snapshot(updated),
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')?.slice(0, 500),
+          schoolId,
+        },
+      });
+      published.push(updated);
+    }
+    const publication = await tx.reportPublication.upsert({
+      where: { termId_classGroupId_type: { termId, classGroupId, type: 'END_OF_TERM' } },
+      create: { type: 'END_OF_TERM', termId, classGroupId, schoolId, publishedById: actorId, publishedAt },
+      update: { schoolId, publishedById: actorId, publishedAt },
+      select: { id: true, publishedAt: true },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId,
+        action: 'END_OF_TERM_REPORTS_PUBLISHED',
+        entityType: 'ReportPublication',
+        entityId: publication.id,
+        schoolId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')?.slice(0, 500),
+        newValues: { type: 'END_OF_TERM', termId, classGroupId, subjectCount: subjectIds.length, resultCount: published.length },
+      },
+    });
+    const userIds = await getStudentAndParentUserIds(tx, {
+      schoolId,
+      studentIds: [...affectedStudentIds],
+    });
+    await createNotifications(tx, {
+      schoolId,
+      userIds,
+      type: 'TERM_RESULT_PUBLISHED',
+      title: 'End-of-term reports published',
+      message: `End-of-term results and reports for ${term.name} are now available.`,
+    });
+    return { count: published.length, subjectCount: subjectIds.length, publishedAt: publication.publishedAt };
+  }, { isolationLevel: 'Serializable' });
 }

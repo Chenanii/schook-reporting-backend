@@ -8,6 +8,7 @@ import {
   listAssessmentsController,
   getAssessmentController,
   updateAssessmentController,
+  deleteAssessmentController,
 } from './assessments.controller.js';
 
 import {
@@ -43,6 +44,7 @@ assessmentsRouter.post('/', createAssessmentController);
 assessmentsRouter.get('/', listAssessmentsController);
 assessmentsRouter.get('/:id', getAssessmentController);
 assessmentsRouter.patch('/:id', updateAssessmentController);
+assessmentsRouter.delete('/:id', deleteAssessmentController);
 assessmentsRouter.get('/:id/results', getAssessmentResultsController);
 assessmentsRouter.put('/:id/results', saveAssessmentResultsController);
 assessmentsRouter.post('/:id/transition', transitionAssessmentController);

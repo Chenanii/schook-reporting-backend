@@ -225,11 +225,11 @@ export async function updateAssessment(id, data, actorId, req, teacherUserId = n
     throw httpError(404, 'ASSESSMENT_NOT_FOUND', 'Assessment not found.');
   }
 
-  if (existing.status !== 'DRAFT') {
+  if (!['DRAFT', 'OPEN'].includes(existing.status)) {
     throw httpError(
       409,
       'ASSESSMENT_NOT_EDITABLE',
-      'Only assessments in DRAFT status can be edited.',
+      'Only draft or open assessments can be edited.',
     );
   }
 
@@ -239,6 +239,14 @@ export async function updateAssessment(id, data, actorId, req, teacherUserId = n
       'ASSESSMENT_HAS_RESULTS',
       'This assessment already has results and cannot be edited.',
     );
+  }
+
+  const term = await prisma.term.findFirst({
+    where: { id: existing.termId, schoolId: existing.schoolId },
+    select: { status: true },
+  });
+  if (!term || !['DRAFT', 'OPEN'].includes(term.status)) {
+    throw httpError(409, 'TERM_NOT_EDITABLE', 'Assessments can only be edited while their term is in DRAFT or OPEN status.');
   }
 
   const updateData = Object.fromEntries(
@@ -266,4 +274,37 @@ export async function updateAssessment(id, data, actorId, req, teacherUserId = n
   });
 
   return updated;
+}
+
+export async function deleteAssessment(id, actorId, req, teacherUserId = null) {
+  const existing = await prisma.assessment.findFirst({
+    where: { id, ...teacherAssessmentScope(teacherUserId) },
+    include: { _count: { select: { results: true } } },
+  });
+
+  if (!existing) {
+    throw httpError(404, 'ASSESSMENT_NOT_FOUND', 'Assessment not found.');
+  }
+  if (existing.status !== 'DRAFT') {
+    throw httpError(409, 'ASSESSMENT_NOT_DELETABLE', 'Only draft assessments can be deleted.');
+  }
+  if (existing._count.results > 0) {
+    throw httpError(409, 'ASSESSMENT_HAS_RESULTS', 'This assessment already has results and cannot be deleted.');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.assessment.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: auditData(
+        actorId,
+        'ASSESSMENT_DELETED',
+        id,
+        auditSnapshot(existing),
+        null,
+        req,
+      ),
+    });
+  });
+
+  return { id, title: existing.title };
 }

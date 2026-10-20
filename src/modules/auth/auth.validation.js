@@ -22,3 +22,12 @@ export const changePasswordSchema = z.object({
     path: ['newPassword']
   }
 );
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email().transform((value) => value.toLowerCase())
+}).strict();
+
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(32).max(256),
+  newPassword: z.string().min(12).max(128)
+}).strict();

@@ -32,6 +32,7 @@ const envSchema = z.object({
     .url()
     .default('http://localhost:5173/accept-invitation'),
   TEACHER_INVITATION_TTL_HOURS: z.coerce.number().int().positive().default(48),
+  PASSWORD_RESET_BASE_URL: z.string().url().default('http://localhost:5173/reset-password'),
 });
 
 const parsed = envSchema.safeParse(process.env);

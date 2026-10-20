@@ -6,7 +6,7 @@ import { requireActiveSubscription } from '../../middleware/require-active-subsc
 import {
   listTermSubjectResultsController,
   finalizeTermSubjectResultsController,
-  publishTermSubjectResultsController,
+  publishClassGroupTermResultsController,
 } from './term-results.controller.js';
 
 export const termResultsRouter = Router();
@@ -28,6 +28,6 @@ termResultsRouter.post(
   finalizeTermSubjectResultsController,
 );
 termResultsRouter.post(
-  '/terms/:termId/classes/:classGroupId/subjects/:subjectId/publish',
-  publishTermSubjectResultsController,
+  '/terms/:termId/classes/:classGroupId/publish-all',
+  publishClassGroupTermResultsController,
 );
