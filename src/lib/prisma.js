@@ -5,8 +5,8 @@ const tenantModels = new Set([
   'User', 'Teacher', 'TeacherInvitation', 'StudentAccount', 'Parent',
   'ParentStudent', 'Student', 'AcademicYear', 'Term', 'GradeScale',
   'GradeBoundary', 'ClassLevel', 'ClassGroup', 'Subject', 'ClassSubject',
-  'TeachingAssignment', 'Enrollment', 'Assessment', 'AssessmentResult',
-  'TermSubjectResult', 'AnnualSubjectResult', 'AnnualResultTerm', 'AuditLog',
+  'TeachingAssignment', 'Enrollment', 'Assessment', 'AssessmentResult', 'ReportPublication',
+  'AnnualSubjectResult', 'AuditLog',
   'PromotionBatch', 'PromotionPolicy', 'SchoolTheme'
 ]);
 

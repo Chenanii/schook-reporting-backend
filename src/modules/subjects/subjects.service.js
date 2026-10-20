@@ -46,7 +46,6 @@ const subjectIncludes = {
     select: {
       classLinks: true,
       assessments: true,
-      termResults: true,
       annualResults: true
     }
   }

@@ -86,6 +86,8 @@ enum NotificationType {
   ASSESSMENT_SUBMITTED
   TERM_RESULT_PUBLISHED
   MID_TERM_REPORT_PUBLISHED
+  END_OF_TERM_REPORT_PUBLISHED
+  END_OF_TERM_REPORT_UNPUBLISHED
 }
 
 enum SchoolStatus {
@@ -142,9 +144,7 @@ model School {
   enrollmentSubjectStreams EnrollmentSubjectStream[]
   assessments          Assessment[]
   assessmentResults    AssessmentResult[]
-  termSubjectResults   TermSubjectResult[]
   annualSubjectResults AnnualSubjectResult[]
-  annualResultTerms    AnnualResultTerm[]
   auditLogs            AuditLog[]
   promotionBatches     PromotionBatch[]
   subscriptions        SchoolSubscription[]
@@ -355,7 +355,7 @@ model Parent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([schoolId, email])
+  @@index([schoolId, email])
   @@index([userId])
   @@index([schoolId, phone])
   @@index([schoolId])
@@ -601,7 +601,6 @@ model Subject {
   teachingAssignments TeachingAssignment[]
   subjectStreams SubjectStream[]
   assessments   Assessment[]
-  termResults   TermSubjectResult[]
   annualResults AnnualSubjectResult[]
 
   createdAt DateTime @default(now())
@@ -781,7 +780,6 @@ model Enrollment {
   nextEnrollment     Enrollment? @relation("EnrollmentProgression")
 
   results     AssessmentResult[]
-  termResults TermSubjectResult[]
   subjectStreams EnrollmentSubjectStream[]
   attendanceRecords AttendanceRecord[]
 
@@ -874,44 +872,7 @@ model AssessmentResult {
 }
 
 // ============================================================
-// TERM REPORT SUBJECT RESULTS
-// These store calculated/finalised subject results for a term.
-// ============================================================
-
-model TermSubjectResult {
-  id               String       @id @default(cuid())
-  enrollmentId     String
-  subjectId        String
-  finalMark        Decimal?     @db.Decimal(5, 2)
-  grade            String?
-  gradeDescription String?
-  teacherComment   String?
-  status           ReportStatus @default(DRAFT)
-  schoolId         String
-
-  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-
-  calculatedAt DateTime?
-  finalizedAt  DateTime?
-  publishedAt  DateTime?
-
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
-  subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
-
-  annualSources AnnualResultTerm[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([enrollmentId, subjectId])
-  @@index([subjectId, status])
-  @@index([status])
-  @@index([schoolId])
-}
-
-// ============================================================
 // ANNUAL SUBJECT RESULTS
-// These aggregate the relevant term results for a student.
 // ============================================================
 
 model AnnualSubjectResult {
@@ -935,7 +896,6 @@ model AnnualSubjectResult {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
 
-  sourceTermResults AnnualResultTerm[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -943,22 +903,6 @@ model AnnualSubjectResult {
   @@unique([studentId, academicYearId, subjectId])
   @@index([academicYearId, subjectId, status])
   @@index([studentId, academicYearId])
-  @@index([schoolId])
-}
-
-// Connects annual results to their contributing term results.
-model AnnualResultTerm {
-  id                    String @id @default(cuid())
-  annualSubjectResultId String
-  termSubjectResultId   String @unique
-  schoolId              String
-
-  school School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-
-  annualSubjectResult AnnualSubjectResult @relation(fields: [annualSubjectResultId], references: [id], onDelete: Restrict)
-  termSubjectResult   TermSubjectResult   @relation(fields: [termSubjectResultId], references: [id], onDelete: Restrict)
-
-  @@index([annualSubjectResultId])
   @@index([schoolId])
 }
 

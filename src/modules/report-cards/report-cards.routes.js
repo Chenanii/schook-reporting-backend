@@ -6,6 +6,8 @@ import { requireActiveSubscription } from '../../middleware/require-active-subsc
 import {
   getClassGroupReportCardsController,
   getReportCardPreviewController,
+  publishClassGroupEndOfTermReportsController,
+  unpublishClassGroupEndOfTermReportsController,
 } from './report-cards.controller.js';
 
 export const reportCardsRouter = Router();
@@ -31,4 +33,14 @@ reportCardsRouter.get(
 reportCardsRouter.get(
   '/enrollments/:enrollmentId',
   getReportCardPreviewController,
+);
+
+reportCardsRouter.post(
+  '/terms/:termId/class-groups/:classGroupId/publish',
+  publishClassGroupEndOfTermReportsController,
+);
+
+reportCardsRouter.post(
+  '/terms/:termId/class-groups/:classGroupId/unpublish',
+  unpublishClassGroupEndOfTermReportsController,
 );

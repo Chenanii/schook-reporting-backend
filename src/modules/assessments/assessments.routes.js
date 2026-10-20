@@ -21,9 +21,6 @@ import {
   resetAssessmentController,
 } from './assessment-lifecycle.controller.js';
 
-import {
-  calculateTermSubjectResultsController,
-} from './term-results-calculation.controller.js';
 
 export const assessmentsRouter = Router();
 
@@ -52,15 +49,4 @@ assessmentsRouter.post(
   '/:id/reset',
   authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'),
   resetAssessmentController,
-);
-assessmentsRouter.post(
-  '/terms/:termId/results/calculate',
-  authorize(
-    'SUPER_ADMIN',
-    'SCHOOL_ADMIN',
-    'HEADTEACHER',
-    'ACADEMIC_ADMIN',
-    'EXAMS_OFFICER',
-  ),
-  calculateTermSubjectResultsController,
 );

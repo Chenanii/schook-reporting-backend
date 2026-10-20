@@ -1,6 +1,7 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
+import { getClassGroupReportCards } from '../report-cards/report-cards.service.js';
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -17,13 +18,10 @@ const DEFAULT_POLICY = {
   requiredSubjectIds: [],
 };
 
-function evaluateStudent(enrollment, policy, isFinalLevel, requiredSubjectIds) {
-  const marks = enrollment.termResults
+function evaluateStudent(enrollment, policy, isFinalLevel, requiredSubjectIds, liveSubjects) {
+  const marks = liveSubjects
     .filter((result) => requiredSubjectIds.includes(result.subjectId))
-    .map((result) => ({
-      subjectId: result.subjectId,
-      mark: result.finalMark == null ? null : Number(result.finalMark),
-    }));
+    .map((result) => ({ subjectId: result.subjectId, mark: result.finalMark == null ? null : Number(result.finalMark) }));
   const missingMarkSubjectIds = marks
     .filter(({ mark }) => mark == null || !Number.isFinite(mark))
     .map(({ subjectId }) => subjectId);
@@ -124,6 +122,14 @@ async function loadPromotionContext(
     throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
   }
 
+  const sourceReportPublication = await db.reportPublication.findFirst({
+    where: { termId: sourceTermId, classGroupId, schoolId: sourceClassGroup.schoolId, type: 'END_OF_TERM' },
+    select: { id: true },
+  });
+  if (!sourceReportPublication) {
+    throw httpError(409, 'SOURCE_TERM_REPORTS_NOT_PUBLISHED', 'End-of-term reports must be published before promotion eligibility can be calculated.');
+  }
+
   if (sourceTerm.academicYearId === destinationTerm.academicYearId) {
     throw httpError(
       409,
@@ -210,10 +216,6 @@ async function loadPromotionContext(
     },
     include: {
       student: true,
-      termResults: {
-        where: { status: 'PUBLISHED' },
-        select: { subjectId: true, finalMark: true },
-      },
     },
     orderBy: { studentId: 'asc' },
   });
@@ -264,13 +266,14 @@ async function loadPromotionContext(
     throw httpError(409, 'INVALID_PROMOTION_POLICY', 'The promotion policy references subjects no longer assigned to this class level. Update the policy before processing promotions.');
   }
 
+  const liveCards = await getClassGroupReportCards({ termId: sourceTermId, classGroupId, schoolId: sourceClassGroup.schoolId, allowIncomplete: true });
+  const liveByEnrollment = new Map(liveCards.map((card) => [card.enrollment.id, card.subjects]));
   const completeEnrollments = enrollments.map((enrollment) => {
-    const publishedIds = new Set(
-      enrollment.termResults.map((result) => result.subjectId),
-    );
+    const liveSubjects = liveByEnrollment.get(enrollment.id) || [];
+    const calculatedIds = new Set(liveSubjects.filter((subject) => subject.complete && subject.finalMark !== null).map((subject) => subject.subjectId));
 
     const missingSubjectIds = requiredSubjectIds.filter(
-      (subjectId) => !publishedIds.has(subjectId),
+      (subjectId) => !calculatedIds.has(subjectId),
     );
 
     return { enrollment, missingSubjectIds };
@@ -279,7 +282,7 @@ async function loadPromotionContext(
   const isFinalLevel = sourceClassGroup.classLevel.nextLevelId == null;
   const eligibleEnrollments = completeEnrollments.map(
     ({ enrollment, missingSubjectIds }) => {
-    const evaluation = evaluateStudent(enrollment, policy, isFinalLevel, requiredSubjectIds);
+    const evaluation = evaluateStudent(enrollment, policy, isFinalLevel, requiredSubjectIds, liveByEnrollment.get(enrollment.id) || []);
     const eligible = evaluation.eligible && missingSubjectIds.length === 0;
     return {
       enrollment,
@@ -653,6 +656,7 @@ export async function approvePromotionBatch({
                 termId: destinationTermId,
                 classLevelId: destinationGroup.classLevelId,
                 classGroupId: decision.destinationClassGroupId,
+                schoolId: sourceClassGroup.schoolId,
                 status: 'ACTIVE',
                 previousEnrollmentId: enrollment.id,
               },
@@ -719,6 +723,7 @@ export async function approvePromotionBatch({
             sourceTermId,
             destinationTermId,
             classGroupId,
+            schoolId: sourceClassGroup.schoolId,
             status: 'APPROVED',
             decisions: decisionSnapshots,
             createdById: actorId,

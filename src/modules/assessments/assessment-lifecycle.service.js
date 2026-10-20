@@ -250,27 +250,12 @@ export async function resetAssessment(assessmentId, actorId, req) {
       throw httpError(409, 'MID_TERM_REPORTS_ALREADY_PUBLISHED', 'This assessment cannot be reset after mid-term reports have been published for its class.');
     }
 
-    const resultScope = {
-      subjectId: assessment.subjectId,
-      enrollment: {
-        is: {
-          termId: assessment.termId,
-          ...(!assessment.teachingAssignment.subjectStreamId ? { classGroupId: assessment.teachingAssignment.classGroupId } : {}),
-          ...(assessment.teachingAssignment.subjectStreamId ? { subjectStreams: { some: { subjectStreamId: assessment.teachingAssignment.subjectStreamId, status: 'ACTIVE' } } } : {}),
-        },
-      },
-    };
-    const protectedResults = await tx.termSubjectResult.count({
-      where: { ...resultScope, status: { in: ['FINALIZED', 'PUBLISHED'] } },
-    });
-    if (protectedResults > 0) {
-      throw httpError(409, 'TERM_RESULTS_ALREADY_FINALIZED', 'Published or finalized term results must be reverted before this assessment can be reset.');
+    const publishedEndOfTermReports = affectedClassGroupIds.length
+      ? await tx.reportPublication.count({ where: { termId: assessment.termId, schoolId: assessment.schoolId, classGroupId: { in: affectedClassGroupIds }, type: 'END_OF_TERM' } })
+      : 0;
+    if (publishedEndOfTermReports > 0) {
+      throw httpError(409, 'END_OF_TERM_REPORTS_ALREADY_PUBLISHED', 'This assessment cannot be reset after end-of-term reports have been published for its class.');
     }
-
-    const invalidated = await tx.termSubjectResult.updateMany({
-      where: { ...resultScope, status: 'DRAFT' },
-      data: { finalMark: null, grade: null, gradeDescription: null, calculatedAt: null },
-    });
 
     const updated = await tx.assessment.update({
       where: { id: assessment.id },
@@ -284,12 +269,12 @@ export async function resetAssessment(assessmentId, actorId, req) {
         entityType: 'Assessment',
         entityId: assessment.id,
         oldValues: snapshot(assessment),
-        newValues: { ...snapshot(updated), marksPreserved: true, invalidatedDraftTermResults: invalidated.count },
+        newValues: { ...snapshot(updated), marksPreserved: true },
         ipAddress: req.ip,
         userAgent: req.get('user-agent')?.slice(0, 500),
       },
     });
 
-    return { ...updated, invalidatedDraftTermResults: invalidated.count };
+    return { ...updated, invalidatedDraftTermResults: 0 };
   }, { isolationLevel: 'Serializable' });
 }

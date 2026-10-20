@@ -102,14 +102,18 @@ export async function createStudent(data, actorId, req, schoolId) {
       for (const [index, contact] of data.parents.entries()) {
         const email = contact.email?.trim().toLowerCase() || null;
         let parent = email
-          ? await tx.parent.upsert({
-              where: { schoolId_email: { schoolId, email } },
-              create: { schoolId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, email },
-              update: { firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone }
+          ? await tx.parent.findFirst({
+              where: { schoolId, email: { equals: email, mode: 'insensitive' } }
             })
           : await tx.parent.findFirst({
-              where: { schoolId, phone: contact.phone, firstName: contact.firstName, lastName: contact.lastName }
+              where: { schoolId, phone: contact.phone }
             });
+        if (parent) {
+          parent = await tx.parent.update({
+            where: { id: parent.id },
+            data: { firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, ...(email ? { email } : {}) }
+          });
+        }
         if (!parent) {
           parent = await tx.parent.create({
             data: { schoolId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, ...(email ? { email } : {}) }
@@ -383,14 +387,27 @@ export async function updateStudent(id, data, actorId, req) {
             if (!parent) {
               throw httpError(400, 'INVALID_STUDENT_PARENT', 'A parent contact does not belong to this student.');
             }
+            const matchingParent = email
+              ? await tx.parent.findFirst({
+                  where: { schoolId: existing.schoolId, id: { not: parent.id }, email: { equals: email, mode: 'insensitive' } }
+                })
+              : phone
+                ? await tx.parent.findFirst({ where: { schoolId: existing.schoolId, id: { not: parent.id }, phone } })
+                : null;
+
+            if (matchingParent) {
+              if (parent.userId && matchingParent.userId && parent.userId !== matchingParent.userId) {
+                throw httpError(409, 'PARENT_ACCOUNTS_CANNOT_BE_MERGED', 'These contact details are linked to a different parent portal account. Contact the school to resolve the parent records.');
+              }
+              if (parent.userId && !matchingParent.userId) {
+                await tx.parent.update({ where: { id: matchingParent.id }, data: { userId: parent.userId } });
+              }
+              parent = matchingParent;
+            }
+
             parent = await tx.parent.update({
               where: { id: parent.id },
-              data: {
-                firstName: contact.firstName,
-                lastName: contact.lastName,
-                email,
-                phone
-              }
+              data: { firstName: contact.firstName, lastName: contact.lastName, email, phone }
             });
             if (parent.userId) {
               await tx.user.update({
@@ -409,7 +426,7 @@ export async function updateStudent(id, data, actorId, req) {
                 })
               : phone
                 ? await tx.parent.findFirst({
-                    where: { schoolId: existing.schoolId, phone, firstName: contact.firstName, lastName: contact.lastName }
+                    where: { schoolId: existing.schoolId, phone }
                   })
                 : null;
 
@@ -536,8 +553,8 @@ export async function updateStudent(id, data, actorId, req) {
     if (error.code === 'P2002' && data.parents !== undefined) {
       throw httpError(
         409,
-        'PARENT_CONTACT_ALREADY_EXISTS',
-        'A parent contact or account already uses this email address.'
+        'PARENT_ACCOUNT_EMAIL_CONFLICT',
+        'This email address is already used by another portal account. Use the parent contact already linked to that account or contact the school for help.'
       );
     }
     handleDatabaseError(error);

@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma.js";
+import { getClassGroupReportCards } from "../report-cards/report-cards.service.js";
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -18,7 +19,7 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
   const [school, parentLinks] = await Promise.all([
     db.school.findFirst({
       where: { id: schoolId, status: "ACTIVE" },
-      select: { id: true, name: true, slug: true, logoDataUrl: true },
+      select: { id: true, name: true, slug: true, logoDataUrl: true, address: true, phone: true, email: true },
     }),
     db.parent.findMany({
       where: { userId, schoolId },
@@ -59,21 +60,6 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
                         status: true,
                         academicYear: {
                           select: { id: true, name: true, isCurrent: true },
-                        },
-                      },
-                    },
-                    termResults: {
-                      where: { status: "PUBLISHED" },
-                      orderBy: { subject: { name: "asc" } },
-                      select: {
-                        id: true,
-                        finalMark: true,
-                        grade: true,
-                        gradeDescription: true,
-                        teacherComment: true,
-                        publishedAt: true,
-                        subject: {
-                          select: { id: true, name: true, code: true },
                         },
                       },
                     },
@@ -131,6 +117,18 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
     publication.publishedAt,
   ]));
 
+  const endOfTermScopes = [...new Map(enrollmentScopes
+    .filter(({ termId, classGroupId }) => publicationByScope.has(`END_OF_TERM:${termId}:${classGroupId}`))
+    .map((scope) => [`${scope.termId}:${scope.classGroupId}`, scope])).values()];
+  const endOfTermResultsByScope = new Map();
+  for (const { termId, classGroupId } of endOfTermScopes) {
+    const cards = await getClassGroupReportCards({ termId, classGroupId, schoolId, allowIncomplete: true });
+    const resultsByEnrollment = new Map(cards.map((card) => [card.enrollment.id, card.subjects
+      .filter((subject) => subject.complete)
+      .map((subject) => ({ id: subject.subjectId, finalMark: subject.finalMark, scoreOutOf: card.scoreOutOf, grade: subject.grade, gradeDescription: subject.gradeDescription, teacherComment: subject.teacherComment, subject: { id: subject.subjectId, name: subject.subjectName, code: subject.subjectCode } }))]));
+    endOfTermResultsByScope.set(`${termId}:${classGroupId}`, resultsByEnrollment);
+  }
+
   const studentsById = new Map();
   for (const link of parentLinks) {
     for (const parentStudent of link.students) {
@@ -145,6 +143,9 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
         null;
       const enrollmentsWithMidTermPublication = student.enrollments.map((enrollment) => ({
         ...enrollment,
+        termResults: enrollment.classGroupId
+          ? endOfTermResultsByScope.get(`${enrollment.termId}:${enrollment.classGroupId}`)?.get(enrollment.id) || []
+          : [],
         midTermPublishedAt: enrollment.classGroupId
           ? publicationByScope.get(`MID_TERM:${enrollment.termId}:${enrollment.classGroupId}`) ?? null
           : null,

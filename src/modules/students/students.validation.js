@@ -37,9 +37,7 @@ const parentContact = z.object({
   email: z.string().trim().email().transform((value) => value.toLowerCase()).optional().or(z.literal('')),
   relationship: z.string().trim().max(40).optional()
 }).strict();
-const registrationParentContact = parentContact
-  .omit({ parentId: true })
-  .extend({ phone: z.string().trim().min(5).max(30) });
+const registrationParentContact = parentContact.omit({ parentId: true });
 
 export const createStudentSchema = z.object({
   termId: z.string().trim().min(1, 'Academic term is required.'),
