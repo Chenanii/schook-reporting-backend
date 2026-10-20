@@ -12,7 +12,8 @@ import {
   listStudentsController,
   getStudentController,
   updateStudentController,
-  updateStudentStatusController
+  updateStudentStatusController,
+  studentClassDistributionController
 } from './students.controller.js';
 
 export const studentsRouter = Router();
@@ -20,6 +21,7 @@ export const studentsRouter = Router();
 studentsRouter.use(authenticate, requireActiveSubscription);
 
 studentsRouter.post('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), requirePlanCapacity('students'), createStudentController);
+studentsRouter.get('/distribution', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), studentClassDistributionController);
 studentsRouter.get('/', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'TEACHER'), listStudentsController);
 studentsRouter.get('/:id', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'TEACHER'), getStudentController);
 studentsRouter.patch('/:id/status', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER'), updateStudentStatusController);

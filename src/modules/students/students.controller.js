@@ -11,7 +11,8 @@ import {
   listStudents,
   getStudentById,
   updateStudent,
-  updateStudentStatus
+  updateStudentStatus,
+  getStudentClassDistribution
 } from './students.service.js';
 
 function validationError(res, error) {
@@ -23,6 +24,15 @@ function validationError(res, error) {
       details: error.issues
     }
   });
+}
+
+export async function studentClassDistributionController(req, res, next) {
+  try {
+    const data = await getStudentClassDistribution(req.schoolId);
+    return res.status(200).json({ success: true, message: 'Student class distribution retrieved successfully.', data });
+  } catch (error) {
+    return next(error);
+  }
 }
 
 export async function createStudentController(req, res, next) {

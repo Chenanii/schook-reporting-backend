@@ -1,4 +1,4 @@
-import { prisma } from '../../lib/prisma.js';
+import { prisma } from "../../lib/prisma.js";
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -9,12 +9,16 @@ function httpError(statusCode, code, message) {
 
 export async function getParentPortalOverview(userId, schoolId, db = prisma) {
   if (!schoolId) {
-    throw httpError(400, 'SCHOOL_CONTEXT_REQUIRED', 'This parent account is not linked to a school workspace.');
+    throw httpError(
+      400,
+      "SCHOOL_CONTEXT_REQUIRED",
+      "This parent account is not linked to a school workspace.",
+    );
   }
 
   const [school, parentLinks] = await Promise.all([
     db.school.findFirst({
-      where: { id: schoolId, status: 'ACTIVE' },
+      where: { id: schoolId, status: "ACTIVE" },
       select: { id: true, name: true, slug: true, logoDataUrl: true },
     }),
     db.parent.findMany({
@@ -25,7 +29,7 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
         lastName: true,
         students: {
           where: { schoolId },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             relationship: true,
@@ -40,7 +44,7 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
                 gender: true,
                 enrollments: {
                   where: { schoolId },
-                  orderBy: [{ createdAt: 'desc' }],
+                  orderBy: [{ createdAt: "desc" }],
                   select: {
                     id: true,
                     status: true,
@@ -51,12 +55,15 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
                         id: true,
                         name: true,
                         sequence: true,
-                        academicYear: { select: { id: true, name: true, isCurrent: true } },
+                        status: true,
+                        academicYear: {
+                          select: { id: true, name: true, isCurrent: true },
+                        },
                       },
                     },
                     termResults: {
-                      where: { status: 'PUBLISHED' },
-                      orderBy: { subject: { name: 'asc' } },
+                      where: { status: "PUBLISHED" },
+                      orderBy: { subject: { name: "asc" } },
                       select: {
                         id: true,
                         finalMark: true,
@@ -64,14 +71,16 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
                         gradeDescription: true,
                         teacherComment: true,
                         publishedAt: true,
-                        subject: { select: { id: true, name: true, code: true } },
+                        subject: {
+                          select: { id: true, name: true, code: true },
+                        },
                       },
                     },
                   },
                 },
                 annualResults: {
-                  where: { schoolId, status: 'PUBLISHED' },
-                  orderBy: { academicYear: { startDate: 'desc' } },
+                  where: { schoolId, status: "PUBLISHED" },
+                  orderBy: { academicYear: { startDate: "desc" } },
                   select: {
                     id: true,
                     finalMark: true,
@@ -89,8 +98,18 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
     }),
   ]);
 
-  if (!school) throw httpError(404, 'SCHOOL_NOT_FOUND', 'The school workspace is unavailable.');
-  if (!parentLinks.length) throw httpError(403, 'PARENT_STUDENT_LINK_REQUIRED', 'No students are linked to this parent account.');
+  if (!school)
+    throw httpError(
+      404,
+      "SCHOOL_NOT_FOUND",
+      "The school workspace is unavailable.",
+    );
+  if (!parentLinks.length)
+    throw httpError(
+      403,
+      "PARENT_STUDENT_LINK_REQUIRED",
+      "No students are linked to this parent account.",
+    );
 
   const studentsById = new Map();
   for (const link of parentLinks) {
@@ -98,9 +117,12 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
       const student = parentStudent.student;
       if (!student) continue;
       const existing = studentsById.get(student.id);
-      const currentEnrollment = student.enrollments.find((enrollment) => enrollment.status === 'ACTIVE')
-        || student.enrollments[0]
-        || null;
+      const currentEnrollment =
+        student.enrollments.find(
+          (enrollment) => enrollment.status === "ACTIVE",
+        ) ||
+        student.enrollments[0] ||
+        null;
       if (!existing) {
         studentsById.set(student.id, {
           id: student.id,
@@ -125,8 +147,10 @@ export async function getParentPortalOverview(userId, schoolId, db = prisma) {
       firstName: parentLinks[0].firstName,
       lastName: parentLinks[0].lastName,
     },
-    students: [...studentsById.values()].sort((left, right) => (
-      `${left.lastName} ${left.firstName}`.localeCompare(`${right.lastName} ${right.firstName}`)
-    )),
+    students: [...studentsById.values()].sort((left, right) =>
+      `${left.lastName} ${left.firstName}`.localeCompare(
+        `${right.lastName} ${right.firstName}`,
+      ),
+    ),
   };
 }

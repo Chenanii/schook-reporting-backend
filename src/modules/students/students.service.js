@@ -574,3 +574,58 @@ export async function updateStudentStatus(id, status, actorId, req) {
     return updated;
   });
 }
+
+export async function getStudentClassDistribution(schoolId) {
+  if (!schoolId) throw httpError(400, 'SCHOOL_CONTEXT_REQUIRED', 'Select a school workspace to view student distribution.');
+
+  const [terms, levels, groups] = await Promise.all([
+    prisma.term.findMany({
+      where: { schoolId },
+      orderBy: [{ academicYear: { isCurrent: 'desc' } }, { academicYear: { startDate: 'desc' } }, { sequence: 'desc' }],
+      select: { id: true, name: true, sequence: true, academicYear: { select: { id: true, name: true } } },
+    }),
+    prisma.classLevel.findMany({ where: { schoolId }, orderBy: { levelOrder: 'asc' }, select: { id: true, name: true, levelOrder: true } }),
+    prisma.classGroup.findMany({ where: { schoolId }, orderBy: [{ classLevel: { levelOrder: 'asc' } }, { name: 'asc' }], select: { id: true, name: true, classLevelId: true } }),
+  ]);
+  const enrollmentGroups = terms.length ? await prisma.enrollment.groupBy({
+      by: ['termId', 'classLevelId', 'classGroupId'],
+      where: { schoolId, termId: { in: terms.map(({ id }) => id) }, status: 'ACTIVE', student: { status: 'ACTIVE' } },
+      _count: { _all: true },
+    }) : [];
+  const term = terms.find(({ id }) => enrollmentGroups.some((row) => row.termId === id)) || terms[0] || null;
+  const counts = term ? enrollmentGroups.filter((row) => row.termId === term.id) : [];
+
+  const groupCounts = new Map();
+  const levelCounts = new Map(levels.map((level) => [level.id, 0]));
+  let unassignedStudents = 0;
+  counts.forEach((row) => {
+    const count = row._count._all;
+    levelCounts.set(row.classLevelId, (levelCounts.get(row.classLevelId) || 0) + count);
+    if (row.classGroupId) groupCounts.set(row.classGroupId, count);
+    else unassignedStudents += count;
+  });
+
+  const groupsByLevel = new Map();
+  groups.forEach((group) => {
+    const levelGroups = groupsByLevel.get(group.classLevelId) || [];
+    levelGroups.push({ id: group.id, name: group.name, students: groupCounts.get(group.id) || 0 });
+    groupsByLevel.set(group.classLevelId, levelGroups);
+  });
+
+  const classes = levels.map((level) => ({
+    ...level,
+    students: levelCounts.get(level.id) || 0,
+    groups: groupsByLevel.get(level.id) || [],
+    unassignedStudents: counts
+      .filter((row) => row.classLevelId === level.id && row.classGroupId === null)
+      .reduce((total, row) => total + row._count._all, 0),
+  }));
+
+  return {
+    term,
+    totalStudents: classes.reduce((total, level) => total + level.students, 0),
+    unassignedStudents,
+    classGroupCount: groups.length,
+    classes,
+  };
+}

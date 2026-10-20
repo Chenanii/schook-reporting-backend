@@ -53,6 +53,24 @@ function reportCardForEnrollment(enrollment, requiredSubjects, scoreOutOf, schoo
   };
 }
 
+export async function getParentReportCard(enrollmentId, userId, schoolId) {
+  const enrollment = await prisma.enrollment.findFirst({
+    where: {
+      id: enrollmentId,
+      schoolId,
+      student: { parents: { some: { parent: { userId, schoolId } } } },
+    },
+    select: { id: true, term: { select: { status: true } } },
+  });
+  if (!enrollment) {
+    throw httpError(404, 'ENROLLMENT_NOT_FOUND', 'This student enrollment is not available to your parent account.');
+  }
+  if (!['PUBLISHED', 'CLOSED'].includes(enrollment.term.status)) {
+    throw httpError(409, 'TERM_REPORT_NOT_PUBLISHED', 'The end-of-term report card will be available after the school publishes the term.');
+  }
+  return getReportCardPreview(enrollment.id);
+}
+
 function ensureResultsPublished(reportCards) {
   if (reportCards.some((reportCard) => reportCard.summary.requiredSubjects === 0)) {
     throw httpError(
