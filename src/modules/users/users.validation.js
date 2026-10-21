@@ -16,7 +16,7 @@ export const createStaffSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
   lastName: z.string().trim().min(1).max(80),
   role: z.enum(staffRoles),
-  password: z.string().min(12).max(128),
+  password: z.string().min(12).max(128).optional(),
   staffNumber: z.string().trim().min(1).max(30).optional()
 });
 

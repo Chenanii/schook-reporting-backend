@@ -157,8 +157,8 @@ export async function requestPasswordReset(email) {
 export async function resetPassword({ token, newPassword }) {
   const tokenHash = hashResetToken(token);
   const reset = await prisma.passwordResetToken.findFirst({
-    where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() }, user: { is: { status: 'ACTIVE' } } },
-    select: { id: true, userId: true }
+    where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() }, user: { is: { status: { in: ['ACTIVE', 'INACTIVE'] } } } },
+    select: { id: true, userId: true, user: { select: { status: true } } }
   });
   if (!reset) throw httpError(400, 'PASSWORD_RESET_LINK_INVALID', 'This password reset link is invalid or has expired. Request a new one.');
 
@@ -168,7 +168,11 @@ export async function resetPassword({ token, newPassword }) {
     data: { usedAt: new Date() }
   });
   if (claimed.count !== 1) throw httpError(400, 'PASSWORD_RESET_LINK_INVALID', 'This password reset link is invalid or has expired. Request a new one.');
-  await prisma.user.update({ where: { id: reset.userId }, data: { passwordHash } });
+  await prisma.user.update({ where: { id: reset.userId }, data: { passwordHash, status: 'ACTIVE' } });
   await prisma.passwordResetToken.deleteMany({ where: { userId: reset.userId, id: { not: reset.id } } });
-  return { message: 'Your password has been reset. You can now sign in with your new password.' };
+  return {
+    message: reset.user.status === 'INACTIVE'
+      ? 'Your account is active. You can now sign in with your new password.'
+      : 'Your password has been reset. You can now sign in with your new password.'
+  };
 }

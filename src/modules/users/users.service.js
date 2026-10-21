@@ -1,6 +1,17 @@
 
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
+import { env } from '../../config/env.js';
+import { sendEmail } from '../../lib/mailer.js';
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
 
 const staffRoles = [
   'SCHOOL_ADMIN',
@@ -51,7 +62,8 @@ function audit(actorId, action, entityId, oldValues, newValues, req) {
 }
 
 export async function createStaff(data, actorId, req) {
-  const passwordHash = await bcrypt.hash(data.password, 12);
+  const initialPassword = data.password || crypto.randomBytes(48).toString('hex');
+  const passwordHash = await bcrypt.hash(initialPassword, 12);
 
   try {
     const user = await prisma.$transaction(async (tx) => {
@@ -62,7 +74,7 @@ export async function createStaff(data, actorId, req) {
           lastName: data.lastName,
           passwordHash,
           role: data.role,
-          status: 'ACTIVE',
+          status: data.password ? 'ACTIVE' : 'INACTIVE',
           ...(data.role === 'TEACHER' || data.role === 'FORM_TUTOR'
             ? {
                 teacher: {
@@ -95,7 +107,34 @@ export async function createStaff(data, actorId, req) {
       return created;
     });
 
-    return publicUser(user);
+    if (data.password) return { user: publicUser(user), invitationEmailSent: null };
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashResetToken(token);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash, expiresAt } });
+    const setupUrl = new URL(env.PASSWORD_RESET_BASE_URL);
+    setupUrl.searchParams.set('token', token);
+    const name = `${user.firstName} ${user.lastName}`;
+    const safeName = escapeHtml(name);
+    const safeAppName = escapeHtml(env.APP_NAME);
+    let invitationEmailSent = true;
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: `${env.APP_NAME} - Set up your account`,
+        text: `Hello ${name},\n\nYou have been invited to join ${env.APP_NAME} as a ${user.role.replaceAll('_', ' ').toLowerCase()}.\n\nSet your password using this link within one hour: ${setupUrl}\n\nIf you were not expecting this invitation, contact your school administrator.`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;line-height:1.6"><h2>${safeAppName}</h2><p>Hello ${safeName},</p><p>You have been invited to join ${safeAppName} as a ${escapeHtml(user.role.replaceAll('_', ' ').toLowerCase())}.</p><p><a href="${escapeHtml(setupUrl)}">Set up your account</a></p><p>This link expires in one hour.</p></div>`
+      });
+    } catch (error) {
+      await prisma.passwordResetToken.deleteMany({ where: { userId: user.id, tokenHash } });
+      await prisma.$transaction(async (tx) => {
+        await tx.teacher.deleteMany({ where: { userId: user.id } });
+        await tx.user.delete({ where: { id: user.id } });
+      });
+      throw httpError(503, 'USER_INVITATION_EMAIL_FAILED', 'The invitation email could not be sent. No user account was created. Check email settings and try again.');
+    }
+    return { user: publicUser(user), invitationEmailSent };
   } catch (error) {
     if (error.code === 'P2002') {
       throw httpError(

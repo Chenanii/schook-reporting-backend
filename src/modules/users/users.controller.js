@@ -38,12 +38,13 @@ export async function createStaffController(req, res, next) {
     const data = validate(createStaffSchema, req.body, res);
     if (!data) return;
 
-    const user = await createStaff(data, req.user.id, req);
+    const result = await createStaff(data, req.user.id, req);
 
     res.status(201).json({
       success: true,
-      message: 'Staff account created successfully.',
-      data: user
+      message: 'Staff account created and invitation sent.',
+      data: result.user,
+      invitationEmailSent: result.invitationEmailSent
     });
   } catch (error) {
     next(error);
