@@ -61,6 +61,7 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
     select: {
       id: true,
       termId: true,
+      status: true,
       teachingAssignment: {
         select: {
           id: true,
@@ -118,7 +119,9 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
       student: enrollment.student,
       mark: result?.mark?.toString() ?? '',
       status: result?.status ?? 'NOT_ENTERED',
-      teacherComment: result?.teacherComment ?? ''
+      teacherComment: result?.teacherComment ?? '',
+      hasResult: Boolean(result),
+      canEnterResult: ['DRAFT', 'OPEN'].includes(assessment.status) || !result
     };
   });
 }
@@ -157,7 +160,8 @@ export async function saveAssessmentResults(
     throw httpError(404, 'ASSESSMENT_NOT_FOUND', 'Assessment not found.');
   }
 
-  if (!['DRAFT', 'OPEN'].includes(assessment.status)) {
+  const finalized = ['SUBMITTED', 'APPROVED', 'LOCKED'].includes(assessment.status);
+  if (!['DRAFT', 'OPEN'].includes(assessment.status) && !finalized) {
     throw httpError(
       409,
       'ASSESSMENT_NOT_EDITABLE',
@@ -191,6 +195,17 @@ export async function saveAssessmentResults(
   const enrollmentMap = new Map(
     enrollments.map((enrollment) => [enrollment.id, enrollment]),
   );
+
+  const existingResults = finalized
+    ? await prisma.assessmentResult.findMany({
+        where: { assessmentId, enrollmentId: { in: enrollmentIds } },
+        select: { enrollmentId: true },
+      })
+    : [];
+  const existingResultIds = new Set(existingResults.map(({ enrollmentId }) => enrollmentId));
+  if (finalized && enrollmentIds.some((id) => existingResultIds.has(id))) {
+    throw httpError(409, 'ASSESSMENT_RESULT_ALREADY_FINALIZED', 'Only students without an existing result can be assessed after this assessment has been submitted or locked.');
+  }
 
   const invalidEnrollmentIds = enrollmentIds.filter(
     (id) => !enrollmentMap.has(id),
@@ -247,14 +262,7 @@ export async function saveAssessmentResults(
       const enteredAt =
         input.status === 'NOT_ENTERED' ? null : new Date();
 
-      const saved = await tx.assessmentResult.upsert({
-        where: {
-          assessmentId_enrollmentId: {
-            assessmentId,
-            enrollmentId: input.enrollmentId,
-          },
-        },
-        create: {
+      const resultData = {
           assessmentId,
           enrollmentId: input.enrollmentId,
           mark,
@@ -262,15 +270,25 @@ export async function saveAssessmentResults(
           teacherComment: input.teacherComment ?? null,
           enteredById: input.status === 'NOT_ENTERED' ? null : actorId,
           enteredAt,
-        },
-        update: {
-          mark,
-          status: input.status,
-          teacherComment: input.teacherComment ?? null,
-          enteredById: input.status === 'NOT_ENTERED' ? null : actorId,
-          enteredAt,
-        },
-      });
+      };
+      const saved = finalized
+        ? await tx.assessmentResult.create({ data: resultData })
+        : await tx.assessmentResult.upsert({
+            where: {
+              assessmentId_enrollmentId: {
+                assessmentId,
+                enrollmentId: input.enrollmentId,
+              },
+            },
+            create: resultData,
+            update: {
+              mark,
+              status: input.status,
+              teacherComment: input.teacherComment ?? null,
+              enteredById: input.status === 'NOT_ENTERED' ? null : actorId,
+              enteredAt,
+            },
+          });
 
       await tx.auditLog.create({
         data: auditData(
