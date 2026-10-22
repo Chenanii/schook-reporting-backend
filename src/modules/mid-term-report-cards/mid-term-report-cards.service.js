@@ -640,5 +640,15 @@ export async function getParentPublishedMidTermReport(enrollmentId, userId, scho
   if (!publication) {
     throw httpError(404, 'MID_TERM_REPORT_NOT_PUBLISHED', 'The school has not published this mid-term report yet.');
   }
-  return getMidTermReportCardPreview(enrollmentId, { schoolId });
+  try {
+    return await getMidTermReportCardPreview(enrollmentId, { schoolId });
+  } catch (error) {
+    // A class may have had a new enrollment or a result change after publication.
+    // Keep staff diagnostics strict, while returning no report to parents until
+    // the report is complete again.
+    if (['MID_TERM_RESULTS_INCOMPLETE', 'MID_TERM_SUBJECTS_NOT_CONFIGURED'].includes(error.code)) {
+      return null;
+    }
+    throw error;
+  }
 }
