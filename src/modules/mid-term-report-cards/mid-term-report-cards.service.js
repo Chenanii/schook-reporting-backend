@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { getReportCardDetails } from '../report-cards/report-card-details.service.js';
 import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
 import { shouldIncludeReportSubject } from '../class-subjects/subject-requirements.js';
 import { createNotifications, getStudentAndParentUserIds } from '../notifications/notifications.service.js';
@@ -85,6 +86,7 @@ const midTermEnrollmentInclude = {
   term: { include: { academicYear: true } },
   classLevel: true,
   classGroup: { include: { classLevel: true } },
+  nextEnrollment: { include: { classLevel: true, classGroup: true, term: true } },
 };
 
 const reportSchoolSelect = {
@@ -94,8 +96,10 @@ const reportSchoolSelect = {
   address: true,
   phone: true,
   logoDataUrl: true,
+  secondaryLogoDataUrl: true,
   classTeacherSignerName: true,
   headteacherSignerName: true,
+  reportDesign: true,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -226,7 +230,7 @@ function resolveReportSubjects(enrollment, classSubjects, streamSelections, subj
   return [...subjectsById.values()].sort((a, b) => a.subject.name.localeCompare(b.subject.name));
 }
 
-function midTermReportCardForEnrollment({ enrollment, subjects, resultsBySubject, boundaries, scoreOutOf, school }) {
+function midTermReportCardForEnrollment({ enrollment, subjects, resultsBySubject, boundaries, scoreOutOf, school, issuedAt, reportDetails }) {
   const subjectResults = subjects.map((subject) => buildSubjectMidTerm(
     subject,
     resultsBySubject.get(subject.subjectId) ?? [],
@@ -242,10 +246,24 @@ function midTermReportCardForEnrollment({ enrollment, subjects, resultsBySubject
   return {
     complete: subjectResults.length > 0 && incompleteSubjects.length === 0,
     reportType: 'MID_TERM',
+    issuedAt,
+    reportDetails,
     enrollment: { id: enrollment.id, status: enrollment.status },
     student: enrollment.student,
+    nextEnrollment: enrollment.nextEnrollment ? {
+      classLevel: enrollment.nextEnrollment.classLevel,
+      classGroup: enrollment.nextEnrollment.classGroup,
+      term: enrollment.nextEnrollment.term,
+    } : null,
     academicYear: enrollment.term.academicYear,
     scoreOutOf,
+    gradeKey: boundaries.map(({ grade, minPercent, description }, index) => ({
+      grade,
+      minPercent: Number(minPercent),
+      minMark: Math.ceil(Number(minPercent) * scoreOutOf / 100),
+      maxMark: index === 0 ? scoreOutOf : Math.ceil(Number(boundaries[index - 1].minPercent) * scoreOutOf / 100) - 1,
+      description,
+    })),
     term: enrollment.term,
     classGroup: enrollment.classGroup,
     classLevel: enrollment.classLevel,
@@ -381,11 +399,21 @@ async function loadMidTermContext(enrollments, { termId, schoolId }) {
 
 async function buildMidTermReportCards(enrollments, { termId, schoolId, classLevelId }) {
   const gradeScale = await getGradeScaleForClassLevel(prisma, classLevelId);
-  const [school, boundaries, context] = await Promise.all([
+  const firstEnrollment = enrollments[0];
+  const [baseSchool, boundaries, context, formTutor, headteacher, publication, detailRows] = await Promise.all([
     prisma.school.findUnique({ where: { id: schoolId }, select: reportSchoolSelect }),
     loadBoundaries(gradeScale),
     loadMidTermContext(enrollments, { termId, schoolId }),
+    prisma.formTutorAssignment.findFirst({ where: { classGroupId: firstEnrollment.classGroupId, academicYearId: firstEnrollment.term.academicYearId, schoolId }, include: { teacher: { select: { firstName: true, lastName: true } } } }),
+    prisma.user.findFirst({ where: { schoolId, role: 'HEADTEACHER', status: 'ACTIVE' }, select: { firstName: true, lastName: true } }),
+    prisma.reportPublication.findFirst({ where: { termId, classGroupId: firstEnrollment.classGroupId, schoolId, type: 'MID_TERM' }, select: { publishedAt: true } }),
+    getReportCardDetails(enrollments.map(({ id }) => id), 'MID_TERM'),
   ]);
+  const detailsByEnrollment = new Map(detailRows.map(({ enrollmentId, ...details }) => [enrollmentId, details]));
+  const formTutorName = formTutor ? `${formTutor.teacher.firstName} ${formTutor.teacher.lastName}`.trim() : null;
+  const headteacherName = headteacher ? `${headteacher.firstName} ${headteacher.lastName}`.trim() : null;
+  const school = { ...baseSchool, classTeacherSignerName: formTutorName || baseSchool.classTeacherSignerName, headteacherSignerName: headteacherName || baseSchool.headteacherSignerName };
+  const issuedAt = publication?.publishedAt || new Date();
 
   return enrollments.map((enrollment) => {
     const resultsBySubject = context.resultsByEnrollment.get(enrollment.id) ?? new Map();
@@ -402,6 +430,8 @@ async function buildMidTermReportCards(enrollments, { termId, schoolId, classLev
       boundaries,
       scoreOutOf: gradeScale.maxScore,
       school,
+      issuedAt,
+      reportDetails: detailsByEnrollment.get(enrollment.id) || null,
     });
   });
 }

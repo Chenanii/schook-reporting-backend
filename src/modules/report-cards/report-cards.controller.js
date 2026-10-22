@@ -15,7 +15,7 @@ function validationError(res, error) {
 export async function getReportCardPreviewController(req, res) {
   const reportCard = await getReportCardPreview(
     req.params.enrollmentId,
-    req.user.role === 'TEACHER' ? req.user.id : null,
+    ['TEACHER', 'FORM_TUTOR'].includes(req.user.role) ? req.user.id : null,
   );
 
   return res.status(200).json({
@@ -34,7 +34,7 @@ export async function getClassGroupReportCardsController(req, res) {
     termId: req.params.termId,
     classGroupId: req.params.classGroupId,
     schoolId: req.schoolId,
-    teacherUserId: req.user.role === 'TEACHER' ? req.user.id : null,
+    teacherUserId: ['TEACHER', 'FORM_TUTOR'].includes(req.user.role) ? req.user.id : null,
     allowIncomplete: query.data.allowIncomplete,
   });
   const publication = await getEndOfTermReportPublication({

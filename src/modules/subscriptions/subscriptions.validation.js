@@ -13,6 +13,14 @@ const planFields = {
   isActive: z.boolean().default(true)
 };
 
+const reportSections = z.array(z.enum([
+  'studentDetails', 'academicPerformance', 'behaviorDiscipline', 'coCurricular',
+  'promotionRemarks', 'gradingKey', 'summary', 'signatures',
+])).max(8).refine((items) => new Set(items).size === items.length, 'Report sections must be unique.');
+const reportHeaderSections = z.array(z.enum([
+  'studentDetails', 'classYear', 'termDates', 'schoolContact',
+])).length(3).refine((items) => new Set(items).size === items.length, 'Header sections must be unique.');
+
 export const createPlanSchema = z.object(planFields);
 export const updatePlanSchema = z.object(planFields).partial().refine(
   (data) => Object.keys(data).length > 0,
@@ -44,8 +52,31 @@ export const updateSchoolProfileSchema = z.object({
     .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)
     .nullable()
     .optional(),
+  secondaryLogoDataUrl: z.string()
+    .max(700_000)
+    .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)
+    .nullable()
+    .optional(),
   classTeacherSignerName: z.string().trim().max(120).nullable().optional(),
-  headteacherSignerName: z.string().trim().max(120).nullable().optional()
+  headteacherSignerName: z.string().trim().max(120).nullable().optional(),
+  reportDesign: z.object({
+    endOfTerm: z.object({
+      title: z.string().trim().min(1).max(100),
+      showLogo: z.boolean(), showContact: z.boolean(), showSummary: z.boolean(),
+      showGradeDescription: z.boolean(), showTeacherComments: z.boolean(), showSignatures: z.boolean(),
+      footerText: z.string().trim().max(500),
+      sections: reportSections,
+      headerSections: reportHeaderSections,
+    }).strict(),
+    midTerm: z.object({
+      title: z.string().trim().min(1).max(100),
+      showLogo: z.boolean(), showContact: z.boolean(), showSummary: z.boolean(),
+      showGradeDescription: z.boolean(), showSignatures: z.boolean(),
+      footerText: z.string().trim().max(500),
+      sections: reportSections,
+      headerSections: reportHeaderSections,
+    }).strict(),
+  }).strict().optional()
 }).refine((data) => Object.keys(data).length > 0, {
   message: 'Provide at least one school field to update.'
 });

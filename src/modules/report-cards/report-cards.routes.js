@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
 import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
+import { saveReportCardDetailsController } from './report-card-details.controller.js';
 
 import {
   getClassGroupReportCardsController,
@@ -22,6 +23,7 @@ reportCardsRouter.use(
     'ACADEMIC_ADMIN',
     'EXAMS_OFFICER',
     'TEACHER',
+    'FORM_TUTOR',
   ),
 );
 
@@ -34,6 +36,8 @@ reportCardsRouter.get(
   '/enrollments/:enrollmentId',
   getReportCardPreviewController,
 );
+
+reportCardsRouter.put('/enrollments/:enrollmentId/details', saveReportCardDetailsController('END_OF_TERM'));
 
 reportCardsRouter.post(
   '/terms/:termId/class-groups/:classGroupId/publish',

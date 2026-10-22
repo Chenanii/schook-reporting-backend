@@ -295,8 +295,10 @@ export async function getSchoolProfile(id) {
       address: true,
       phone: true,
       logoDataUrl: true,
+      secondaryLogoDataUrl: true,
       classTeacherSignerName: true,
       headteacherSignerName: true,
+      reportDesign: true,
       status: true,
       createdAt: true,
     }
@@ -322,8 +324,10 @@ export async function updateSchoolProfile(id, data, actorId) {
           address: school.address,
           phone: school.phone,
           hasLogo: Boolean(school.logoDataUrl),
+          hasSecondaryLogo: Boolean(school.secondaryLogoDataUrl),
           classTeacherSignerName: school.classTeacherSignerName,
           headteacherSignerName: school.headteacherSignerName,
+          reportDesign: school.reportDesign,
         },
         newValues: {
           name: updated.name,
@@ -332,8 +336,10 @@ export async function updateSchoolProfile(id, data, actorId) {
           address: updated.address,
           phone: updated.phone,
           hasLogo: Boolean(updated.logoDataUrl),
+          hasSecondaryLogo: Boolean(updated.secondaryLogoDataUrl),
           classTeacherSignerName: updated.classTeacherSignerName,
           headteacherSignerName: updated.headteacherSignerName,
+          reportDesign: updated.reportDesign,
         }
       }
     });
@@ -345,8 +351,10 @@ export async function updateSchoolProfile(id, data, actorId) {
       address: updated.address,
       phone: updated.phone,
       logoDataUrl: updated.logoDataUrl,
+      secondaryLogoDataUrl: updated.secondaryLogoDataUrl,
       classTeacherSignerName: updated.classTeacherSignerName,
       headteacherSignerName: updated.headteacherSignerName,
+      reportDesign: updated.reportDesign,
     };
   });
 }

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
 import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
+import { saveReportCardDetailsController } from '../report-cards/report-card-details.controller.js';
 
 import {
   getClassGroupMidTermReportCardsController,
@@ -28,6 +29,7 @@ midTermReportCardsRouter.use(
 
 // GET /mid-term-report-cards/enrollments/:enrollmentId[?allowIncomplete=true]
 midTermReportCardsRouter.get('/enrollments/:enrollmentId', getMidTermReportCardPreviewController);
+midTermReportCardsRouter.put('/enrollments/:enrollmentId/details', saveReportCardDetailsController('MID_TERM'));
 
 // GET /mid-term-report-cards/terms/:termId/class-groups/:classGroupId[?allowIncomplete=true]
 midTermReportCardsRouter.get(

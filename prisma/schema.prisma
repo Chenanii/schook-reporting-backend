@@ -117,8 +117,10 @@ model School {
   address                  String?
   phone                    String?
   logoDataUrl              String?      @db.Text
+  secondaryLogoDataUrl     String?      @db.Text
   classTeacherSignerName   String?
   headteacherSignerName    String?
+  reportDesign             Json           @default("{}")
   status                   SchoolStatus @default(ACTIVE)
 
   users                User[]
@@ -151,6 +153,7 @@ model School {
   promotionPolicies    PromotionPolicy[]
   notifications        Notification[]
   reportPublications   ReportPublication[]
+  reportCardDetails    ReportCardDetails[]
   theme SchoolTheme?
 
   createdAt DateTime @default(now())
@@ -782,6 +785,7 @@ model Enrollment {
   results     AssessmentResult[]
   subjectStreams EnrollmentSubjectStream[]
   attendanceRecords AttendanceRecord[]
+  reportCardDetails ReportCardDetails[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -792,6 +796,24 @@ model Enrollment {
   @@index([studentId, status])
   @@index([termId, status])
   @@index([schoolId])
+}
+
+model ReportCardDetails {
+  id                    String               @id @default(cuid())
+  enrollmentId          String
+  schoolId              String
+  reportType            ReportPublicationType
+  behaviorComments      Json                 @default("{}")
+  coCurricularComments  Json                 @default("{}")
+  promotedTo            String?
+  promotionRemarks      String?              @db.Text
+  enrollment            Enrollment           @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  school                School               @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@unique([enrollmentId, reportType])
+  @@index([schoolId, reportType])
 }
 
 model EnrollmentSubjectStream {

@@ -1,11 +1,12 @@
 import { prisma } from '../../lib/prisma.js';
+import { getReportCardDetails } from './report-card-details.service.js';
 import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
 import { shouldIncludeReportSubject } from '../class-subjects/subject-requirements.js';
 import { createNotifications, getStudentAndParentUserIds } from '../notifications/notifications.service.js';
 
 const LOCKED = 'LOCKED';
 const MAX_ERROR_DETAILS = 10;
-const schoolSelect = { id: true, name: true, email: true, address: true, phone: true, logoDataUrl: true, classTeacherSignerName: true, headteacherSignerName: true };
+const schoolSelect = { id: true, name: true, email: true, address: true, phone: true, logoDataUrl: true, secondaryLogoDataUrl: true, classTeacherSignerName: true, headteacherSignerName: true, reportDesign: true };
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -104,8 +105,20 @@ function buildReportCard(enrollment, subjects, assessmentResults, boundaries, sc
     reportType: 'END_OF_TERM',
     enrollment: { id: enrollment.id, status: enrollment.status },
     student: enrollment.student,
+    nextEnrollment: enrollment.nextEnrollment ? {
+      classLevel: enrollment.nextEnrollment.classLevel,
+      classGroup: enrollment.nextEnrollment.classGroup,
+      term: enrollment.nextEnrollment.term,
+    } : null,
     academicYear: enrollment.term.academicYear,
     scoreOutOf,
+    gradeKey: boundaries.map(({ grade, minPercent, description }, index) => ({
+      grade,
+      minPercent: Number(minPercent),
+      minMark: Math.ceil(Number(minPercent) * scoreOutOf / 100),
+      maxMark: index === 0 ? scoreOutOf : Math.ceil(Number(boundaries[index - 1].minPercent) * scoreOutOf / 100) - 1,
+      description,
+    })),
     term: enrollment.term,
     classGroup: enrollment.classGroup,
     classLevel: enrollment.classLevel,
@@ -136,7 +149,8 @@ async function loadCards(enrollments, { termId, schoolId, classLevelId, publicat
   if (!enrollments.length) return [];
   const enrollmentIds = enrollments.map(({ id }) => id);
   const classLevelIds = [...new Set(enrollments.map(({ classLevelId: id }) => id))];
-  const [classSubjects, streams, assessments, school, gradeScale] = await Promise.all([
+  const sampleEnrollment = enrollments[0];
+  const [classSubjects, streams, assessments, baseSchool, gradeScale, formTutor, headteacher, detailRows] = await Promise.all([
     prisma.classSubject.findMany({ where: { classLevelId: { in: classLevelIds }, schoolId, isRequired: true, subject: { status: 'ACTIVE' } }, include: { subject: true } }),
     prisma.enrollmentSubjectStream.findMany({ where: { enrollmentId: { in: enrollmentIds }, schoolId, subjectStream: { termId, subject: { status: 'ACTIVE' } } }, include: { subjectStream: { include: { subject: true } } } }),
     prisma.assessment.findMany({
@@ -149,7 +163,14 @@ async function loadCards(enrollments, { termId, schoolId, classLevelId, publicat
     }),
     prisma.school.findUnique({ where: { id: schoolId }, select: schoolSelect }),
     getGradeScaleForClassLevel(prisma, classLevelId),
+    prisma.formTutorAssignment.findFirst({ where: { classGroupId: sampleEnrollment.classGroupId, academicYearId: sampleEnrollment.term.academicYearId, schoolId }, include: { teacher: { select: { firstName: true, lastName: true } } } }),
+    prisma.user.findFirst({ where: { schoolId, role: 'HEADTEACHER', status: 'ACTIVE' }, select: { firstName: true, lastName: true } }),
+    getReportCardDetails(enrollmentIds, 'END_OF_TERM'),
   ]);
+  const detailsByEnrollment = new Map(detailRows.map(({ enrollmentId, ...details }) => [enrollmentId, details]));
+  const formTutorName = formTutor ? `${formTutor.teacher.firstName} ${formTutor.teacher.lastName}`.trim() : null;
+  const headteacherName = headteacher ? `${headteacher.firstName} ${headteacher.lastName}`.trim() : null;
+  const school = { ...baseSchool, classTeacherSignerName: formTutorName || baseSchool.classTeacherSignerName, headteacherSignerName: headteacherName || baseSchool.headteacherSignerName };
   const classSubjectsByLevel = new Map();
   classSubjects.forEach((item) => { const list = classSubjectsByLevel.get(item.classLevelId) || []; list.push(item); classSubjectsByLevel.set(item.classLevelId, list); });
   const streamsByEnrollment = new Map();
@@ -167,7 +188,7 @@ async function loadCards(enrollments, { termId, schoolId, classLevelId, publicat
       resultMap.set(assessment.subjectId, list);
     });
     const subjects = subjectsForEnrollment(enrollment, classSubjectsByLevel.get(enrollment.classLevelId) || [], selections);
-    return buildReportCard(enrollment, subjects, resultMap, boundaries, gradeScale.maxScore, school, Boolean(publication));
+    return { ...buildReportCard(enrollment, subjects, resultMap, boundaries, gradeScale.maxScore, school, Boolean(publication)), reportDetails: detailsByEnrollment.get(enrollment.id) || null, issuedAt: publication?.publishedAt || new Date() };
   });
 }
 
@@ -184,11 +205,14 @@ export async function getParentReportCard(enrollmentId, userId, schoolId) {
 }
 
 export async function getReportCardPreview(enrollmentId, teacherUserId = null, parentAccess = false) {
-  const enrollment = await prisma.enrollment.findUnique({ where: { id: enrollmentId }, include: { student: true, term: { include: { academicYear: true } }, classLevel: true, classGroup: { include: { classLevel: true } } } });
+  const enrollment = await prisma.enrollment.findUnique({ where: { id: enrollmentId }, include: { student: true, term: { include: { academicYear: true } }, classLevel: true, classGroup: { include: { classLevel: true } }, nextEnrollment: { include: { classLevel: true, classGroup: true, term: true } } } });
   if (!enrollment) throw httpError(404, 'ENROLLMENT_NOT_FOUND', 'Student enrollment not found.');
   if (teacherUserId && !parentAccess) {
     const assignment = await prisma.teachingAssignment.findFirst({ where: { teacher: { is: { userId: teacherUserId } }, termId: enrollment.termId, schoolId: enrollment.schoolId, OR: [{ classGroupId: enrollment.classGroupId || undefined }, { subjectStream: { is: { classLevelId: enrollment.classLevelId, studentSelections: { some: { enrollmentId, status: 'ACTIVE' } } } } }] }, select: { id: true } });
-    if (!assignment) throw httpError(403, 'REPORT_CARD_ACCESS_DENIED', 'You are not assigned to this class group for the selected term.');
+    const formTutorAssignment = !assignment && enrollment.classGroupId
+      ? await prisma.formTutorAssignment.findFirst({ where: { classGroupId: enrollment.classGroupId, academicYearId: enrollment.term.academicYearId, schoolId: enrollment.schoolId, teacher: { userId: teacherUserId } }, select: { id: true } })
+      : null;
+    if (!assignment && !formTutorAssignment) throw httpError(403, 'REPORT_CARD_ACCESS_DENIED', 'You are not assigned to this class group for the selected term.');
   }
   const publication = enrollment.classGroupId ? await publicationFor(enrollment.termId, enrollment.classGroupId, enrollment.schoolId) : null;
   const [card] = await loadCards([enrollment], { termId: enrollment.termId, schoolId: enrollment.schoolId, classLevelId: enrollment.classLevelId, publication });
@@ -199,7 +223,7 @@ export async function getReportCardPreview(enrollmentId, teacherUserId = null, p
 export async function getClassGroupReportCards({ termId, classGroupId, schoolId, teacherUserId = null, allowIncomplete = false }) {
   const [classGroup, term, publication] = await Promise.all([
     prisma.classGroup.findFirst({ where: { id: classGroupId, schoolId }, select: { classLevelId: true } }),
-    prisma.term.findFirst({ where: { id: termId, schoolId }, select: { id: true } }),
+    prisma.term.findFirst({ where: { id: termId, schoolId }, select: { id: true, academicYearId: true } }),
     publicationFor(termId, classGroupId, schoolId),
   ]);
   if (!classGroup || !term) throw httpError(404, 'CLASS_GROUP_TERM_NOT_FOUND', 'The selected term or class group was not found.');
@@ -217,9 +241,12 @@ export async function getClassGroupReportCards({ termId, classGroupId, schoolId,
       },
       select: { id: true },
     });
-    if (!assigned) throw httpError(403, 'REPORT_CARD_ACCESS_DENIED', 'You are not assigned to this class group for the selected term.');
+    const formTutorAssignment = !assigned
+      ? await prisma.formTutorAssignment.findFirst({ where: { classGroupId, academicYearId: term.academicYearId, schoolId, teacher: { userId: teacherUserId } }, select: { id: true } })
+      : null;
+    if (!assigned && !formTutorAssignment) throw httpError(403, 'REPORT_CARD_ACCESS_DENIED', 'You are not assigned to this class group for the selected term.');
   }
-  const enrollments = await prisma.enrollment.findMany({ where: { termId, classGroupId, schoolId, status: 'ACTIVE' }, include: { student: true, term: { include: { academicYear: true } }, classLevel: true, classGroup: { include: { classLevel: true } } }, orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }] });
+  const enrollments = await prisma.enrollment.findMany({ where: { termId, classGroupId, schoolId, status: 'ACTIVE' }, include: { student: true, term: { include: { academicYear: true } }, classLevel: true, classGroup: { include: { classLevel: true } }, nextEnrollment: { include: { classLevel: true, classGroup: true, term: true } } }, orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }] });
   const cards = await loadCards(enrollments, { termId, schoolId, classLevelId: classGroup.classLevelId, publication });
   if (!allowIncomplete) ensureResultsReady(cards);
   return cards;
