@@ -8,6 +8,14 @@ function httpError(statusCode, code, message) {
   return error;
 }
 
+function isExamType(type) {
+  return ['MID_TERM_EXAM', 'FINAL_EXAM'].includes(type);
+}
+
+function attendanceDay(date) {
+  return new Date(`${date.toISOString().slice(0, 10)}T00:00:00.000Z`);
+}
+
 function auditData(actorId, action, entityId, oldValues, newValues, req) {
   return {
     actorId,
@@ -61,6 +69,9 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
     select: {
       id: true,
       termId: true,
+      schoolId: true,
+      assessmentType: true,
+      assessmentDate: true,
       status: true,
       teachingAssignment: {
         select: {
@@ -80,9 +91,39 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
     throw httpError(404, 'ASSESSMENT_NOT_FOUND', 'Assessment not found.');
   }
 
+  if (isExamType(assessment.assessmentType) && !assessment.assessmentDate) {
+    throw httpError(409, 'ASSESSMENT_DATE_REQUIRED', 'Set the exam date before entering results.');
+  }
+
+  let eligibleEnrollmentIds = null;
+  let presentEnrollmentIds = null;
+  if (isExamType(assessment.assessmentType)) {
+    presentEnrollmentIds = new Set((await prisma.attendanceRecord.findMany({
+        where: {
+          status: 'PRESENT',
+          attendanceSession: {
+            termId: assessment.termId,
+            schoolId: assessment.schoolId,
+            date: attendanceDay(assessment.assessmentDate),
+          },
+        },
+        select: { enrollmentId: true },
+      })).map(({ enrollmentId }) => enrollmentId));
+    // Keep persisted absent rows visible throughout review, including after the
+    // assessment is submitted. Submission creates these rows for exam absentees.
+    const absentEnrollmentIds = new Set((await prisma.assessmentResult.findMany({
+      where: { assessmentId, status: 'ABSENT' },
+      select: { enrollmentId: true },
+    })).map(({ enrollmentId }) => enrollmentId));
+    eligibleEnrollmentIds = ['SUBMITTED', 'APPROVED', 'LOCKED'].includes(assessment.status)
+      ? null
+      : new Set([...presentEnrollmentIds, ...absentEnrollmentIds]);
+  }
+
   const enrollments = await prisma.enrollment.findMany({
     where: {
       termId: assessment.termId,
+      ...(eligibleEnrollmentIds ? { id: { in: [...eligibleEnrollmentIds] } } : {}),
       ...enrollmentScope(assessment.teachingAssignment),
       status: 'ACTIVE'
     },
@@ -121,7 +162,8 @@ export async function getAssessmentResultEntries(assessmentId, teacherUserId = n
       status: result?.status ?? 'NOT_ENTERED',
       teacherComment: result?.teacherComment ?? '',
       hasResult: Boolean(result),
-      canEnterResult: ['DRAFT', 'OPEN'].includes(assessment.status) || !result
+      canEnterResult: ['DRAFT', 'OPEN'].includes(assessment.status) || !result,
+      approvedAbsenceCorrection: Boolean(presentEnrollmentIds && !presentEnrollmentIds.has(enrollment.id))
     };
   });
 }
@@ -140,6 +182,9 @@ export async function saveAssessmentResults(
       title: true,
       maxMark: true,
       termId: true,
+      schoolId: true,
+      assessmentType: true,
+      assessmentDate: true,
       status: true,
       teachingAssignment: {
         select: {
@@ -229,6 +274,40 @@ export async function saveAssessmentResults(
       'INACTIVE_ENROLLMENTS',
       'Results can only be entered for ACTIVE enrollments.',
     );
+  }
+
+  if (isExamType(assessment.assessmentType)) {
+    if (!assessment.assessmentDate) {
+      throw httpError(409, 'ASSESSMENT_DATE_REQUIRED', 'Set the exam date before entering results.');
+    }
+    const presentEnrollmentIds = new Set((await prisma.attendanceRecord.findMany({
+      where: {
+        enrollmentId: { in: enrollmentIds },
+        status: 'PRESENT',
+        attendanceSession: {
+          termId: assessment.termId,
+          schoolId: assessment.schoolId,
+          date: attendanceDay(assessment.assessmentDate),
+        },
+      },
+      select: { enrollmentId: true },
+    })).map(({ enrollmentId }) => enrollmentId));
+    const absentEnrollmentIds = enrollmentIds.filter((id) => !presentEnrollmentIds.has(id));
+    if (absentEnrollmentIds.length) {
+      const approvedAbsentRows = assessment.status === 'OPEN'
+        ? await prisma.assessmentResult.findMany({
+            where: { assessmentId, enrollmentId: { in: absentEnrollmentIds }, status: 'ABSENT' },
+            select: { enrollmentId: true },
+          })
+        : [];
+      const approvedAbsentIds = new Set(approvedAbsentRows.map(({ enrollmentId }) => enrollmentId));
+      if (absentEnrollmentIds.some((id) => !approvedAbsentIds.has(id))) {
+        throw httpError(400, 'EXAM_STUDENT_NOT_PRESENT', 'Results can only be entered for students marked PRESENT on the exam date, unless an administrator has reopened an absent student’s result for correction.');
+      }
+      if (inputResults.some((result) => absentEnrollmentIds.includes(result.enrollmentId) && result.status !== 'PRESENT')) {
+        throw httpError(400, 'ABSENCE_CORRECTION_MARK_REQUIRED', 'An approved absence correction must include a PRESENT result and a numeric mark.');
+      }
+    }
   }
 
   const maxMark = Number(assessment.maxMark);

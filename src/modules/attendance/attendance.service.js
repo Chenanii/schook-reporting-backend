@@ -206,6 +206,19 @@ export async function saveAttendance({ termId, classGroupId, date, records }, us
   });
 }
 
+export async function resolveAttendanceQr({ termId, classGroupId, code }, user, schoolId) {
+  const term = await loadTerm(termId, schoolId);
+  const group = await prisma.classGroup.findFirst({ where: { id: classGroupId, schoolId }, select: { id: true } });
+  if (!group) throw httpError(404, 'CLASS_GROUP_NOT_FOUND', 'Class group not found.');
+  if (!ADMIN_ROLES.includes(user.role)) await requireCurrentFormTutor(prisma, classGroupId, term.academicYearId, user.id, schoolId);
+  const enrollment = await prisma.enrollment.findFirst({
+    where: { termId, classGroupId, schoolId, status: 'ACTIVE', student: { admissionNumber: code, status: 'ACTIVE' } },
+    select: { id: true, student: { select: { id: true, admissionNumber: true, firstName: true, middleName: true, lastName: true } } }
+  });
+  if (!enrollment) throw httpError(404, 'QR_STUDENT_NOT_IN_CLASS', 'This QR code does not belong to an active student in the selected class.');
+  return { enrollmentId: enrollment.id, student: enrollment.student };
+}
+
 export async function getAttendanceReport({ termId, classGroupId, studentId }, schoolId) {
   const term = await loadTerm(termId, schoolId);
   const enrollments = await prisma.enrollment.findMany({

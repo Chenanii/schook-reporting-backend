@@ -1,5 +1,5 @@
-import { attendanceClassesSchema, attendanceReportQuerySchema, attendanceSheetQuerySchema, saveAttendanceSchema } from './attendance.validation.js';
-import { getAttendanceReport, getAttendanceSheet, listAttendanceClasses, saveAttendance } from './attendance.service.js';
+import { attendanceClassesSchema, attendanceReportQuerySchema, attendanceSheetQuerySchema, saveAttendanceSchema, scanAttendanceSchema } from './attendance.validation.js';
+import { getAttendanceReport, getAttendanceSheet, listAttendanceClasses, saveAttendance, resolveAttendanceQr } from './attendance.service.js';
 
 function xmlEscape(value) {
   return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
@@ -86,6 +86,15 @@ export async function saveAttendanceController(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+export async function scanAttendanceController(req, res, next) {
+  try {
+    const parsed = scanAttendanceSchema.safeParse(req.body);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const data = await resolveAttendanceQr(parsed.data, req.user, req.schoolId);
+    return res.status(200).json({ success: true, data });
+  } catch (error) { next(error); }
 }
 
 export async function attendanceReportController(req, res, next) {

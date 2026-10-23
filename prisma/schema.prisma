@@ -844,6 +844,7 @@ model Assessment {
   id                   String           @id @default(cuid())
   title                String
   assessmentType       String
+  assessmentDate       DateTime?         @db.Date
   maxMark              Decimal          @db.Decimal(7, 2)
   termId               String
   subjectId            String

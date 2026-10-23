@@ -83,12 +83,22 @@ const assessmentInclude = {
 const editableFields = [
   'title',
   'assessmentType',
+  'assessmentDate',
 ];
+
+function isExamType(type) {
+  return ['MID_TERM_EXAM', 'FINAL_EXAM'].includes(type);
+}
+
+function asDate(value) {
+  return value ? new Date(`${value}T00:00:00.000Z`) : null;
+}
 
 function auditSnapshot(assessment) {
   return {
     title: assessment.title,
     assessmentType: assessment.assessmentType,
+    assessmentDate: assessment.assessmentDate?.toISOString().slice(0, 10) ?? null,
     maxMark: assessment.maxMark.toString(),
     termId: assessment.termId,
     subjectId: assessment.subjectId,
@@ -98,6 +108,9 @@ function auditSnapshot(assessment) {
 }
 
 export async function createAssessment(data, actorId, req, teacherUserId = null) {
+  if (isExamType(data.assessmentType) && !data.assessmentDate) {
+    throw httpError(400, 'ASSESSMENT_DATE_REQUIRED', 'An exam date is required for mid-term and final exams.');
+  }
   const assignment = await prisma.teachingAssignment.findFirst({
     where: {
       id: data.teachingAssignmentId,
@@ -131,6 +144,8 @@ export async function createAssessment(data, actorId, req, teacherUserId = null)
     select: {
       id: true,
       status: true,
+      startDate: true,
+      endDate: true,
     },
   });
 
@@ -146,11 +161,17 @@ export async function createAssessment(data, actorId, req, teacherUserId = null)
     );
   }
 
+  const assessmentDate = asDate(data.assessmentDate);
+  if (assessmentDate && (assessmentDate < term.startDate || assessmentDate > term.endDate)) {
+    throw httpError(400, 'ASSESSMENT_DATE_OUTSIDE_TERM', 'The exam date must fall within the selected term.');
+  }
+
   const assessment = await prisma.$transaction(async (tx) => {
     const created = await tx.assessment.create({
       data: {
         title: data.title,
         assessmentType: data.assessmentType,
+        assessmentDate,
         maxMark: 100,
         termId: data.termId,
         teachingAssignmentId: assignment.id,
@@ -177,7 +198,7 @@ export async function createAssessment(data, actorId, req, teacherUserId = null)
 }
 
 export async function listAssessments(filters = {}, teacherUserId = null) {
-  return prisma.assessment.findMany({
+  const assessments = await prisma.assessment.findMany({
     where: {
       ...teacherAssessmentScope(teacherUserId),
       ...(filters.termId && { termId: filters.termId }),
@@ -196,6 +217,24 @@ export async function listAssessments(filters = {}, teacherUserId = null) {
       { title: 'asc' },
     ],
   });
+
+  const assessmentIds = assessments.map(({ id }) => id);
+  const resets = assessmentIds.length
+    ? await prisma.auditLog.findMany({
+        where: {
+          entityType: 'Assessment',
+          entityId: { in: assessmentIds },
+          action: 'ASSESSMENT_RESET',
+        },
+        select: { entityId: true },
+      })
+    : [];
+  const resetAssessmentIds = new Set(resets.map(({ entityId }) => entityId));
+
+  return assessments.map((assessment) => ({
+    ...assessment,
+    adminReopened: assessment.status === 'OPEN' && resetAssessmentIds.has(assessment.id),
+  }));
 }
 
 export async function getAssessmentById(id, teacherUserId = null) {
@@ -233,7 +272,11 @@ export async function updateAssessment(id, data, actorId, req, teacherUserId = n
     );
   }
 
-  if (existing._count.results > 0) {
+  const settingMissingExamDate = existing.assessmentDate == null
+    && isExamType(existing.assessmentType)
+    && typeof data.assessmentDate === 'string'
+    && Object.keys(data).every((key) => key === 'assessmentDate');
+  if (existing._count.results > 0 && !settingMissingExamDate) {
     throw httpError(
       409,
       'ASSESSMENT_HAS_RESULTS',
@@ -243,10 +286,21 @@ export async function updateAssessment(id, data, actorId, req, teacherUserId = n
 
   const term = await prisma.term.findFirst({
     where: { id: existing.termId, schoolId: existing.schoolId },
-    select: { status: true },
+    select: { status: true, startDate: true, endDate: true },
   });
   if (!term || !['DRAFT', 'OPEN'].includes(term.status)) {
     throw httpError(409, 'TERM_NOT_EDITABLE', 'Assessments can only be edited while their term is in DRAFT or OPEN status.');
+  }
+
+  const updatedType = data.assessmentType || existing.assessmentType;
+  const updatedDate = data.assessmentDate === undefined
+    ? existing.assessmentDate
+    : asDate(data.assessmentDate);
+  if (isExamType(updatedType) && !updatedDate) {
+    throw httpError(400, 'ASSESSMENT_DATE_REQUIRED', 'An exam date is required for mid-term and final exams.');
+  }
+  if (updatedDate && (updatedDate < term.startDate || updatedDate > term.endDate)) {
+    throw httpError(400, 'ASSESSMENT_DATE_OUTSIDE_TERM', 'The exam date must fall within the selected term.');
   }
 
   const updateData = Object.fromEntries(

@@ -37,3 +37,10 @@ export const saveAttendanceSchema = z.object({
     { message: 'Each student can only be marked once.', path: ['records'] }
   )
 }).strict();
+
+export const scanAttendanceSchema = z.object({
+  termId: idSchema,
+  classGroupId: idSchema,
+  date: dateSchema,
+  code: z.string().trim().min(1).max(100)
+}).strict();

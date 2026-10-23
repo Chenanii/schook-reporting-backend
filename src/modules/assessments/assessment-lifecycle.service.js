@@ -19,10 +19,15 @@ const nextStatus = {
   APPROVED: 'LOCKED',
 };
 
+function isExamType(type) {
+  return ['MID_TERM_EXAM', 'FINAL_EXAM'].includes(type);
+}
+
 function snapshot(assessment) {
   return {
     status: assessment.status,
     title: assessment.title,
+    assessmentDate: assessment.assessmentDate?.toISOString().slice(0, 10) ?? null,
     termId: assessment.termId,
     teachingAssignmentId: assessment.teachingAssignmentId,
   };
@@ -84,7 +89,15 @@ export async function transitionAssessment(
     );
   }
 
+  let examAbsentEnrollmentIds = [];
+  let resetAbsentEnrollmentIds = [];
   if (targetStatus === 'SUBMITTED') {
+    const adminReopenedExam = isExamType(assessment.assessmentType)
+      && assessment.status === 'OPEN'
+      && Boolean(await prisma.auditLog.findFirst({
+        where: { entityType: 'Assessment', entityId: assessment.id, action: 'ASSESSMENT_RESET' },
+        select: { id: true },
+      }));
     const assignment = assessment.teachingAssignment;
     const enrollmentScope = assignment.classSubject?.isRequired
       ? { classLevelId: assignment.classSubject.classLevelId }
@@ -109,7 +122,7 @@ export async function transitionAssessment(
         ...enrollmentScope,
         status: 'ACTIVE',
       },
-      select: { id: true },
+      select: { id: true, classGroupId: true },
     });
 
     if (activeEnrollments.length === 0) {
@@ -120,18 +133,53 @@ export async function transitionAssessment(
       );
     }
 
+    let requiredEnrollments = activeEnrollments;
+    if (isExamType(assessment.assessmentType)) {
+      if (!assessment.assessmentDate) {
+        throw httpError(409, 'ASSESSMENT_DATE_REQUIRED', 'Set the exam date before submitting results.');
+      }
+      const date = new Date(`${assessment.assessmentDate.toISOString().slice(0, 10)}T00:00:00.000Z`);
+      const classGroupIds = [...new Set(activeEnrollments.map(({ classGroupId }) => classGroupId).filter(Boolean))];
+      const sessions = classGroupIds.length ? await prisma.attendanceSession.findMany({
+        where: { schoolId: assessment.schoolId, termId: assessment.termId, date, classGroupId: { in: classGroupIds } },
+        select: { classGroupId: true },
+      }) : [];
+      const recordedClassGroups = new Set(sessions.map(({ classGroupId }) => classGroupId));
+      if (activeEnrollments.some(({ classGroupId }) => !classGroupId || !recordedClassGroups.has(classGroupId))) {
+        throw httpError(409, 'EXAM_ATTENDANCE_NOT_RECORDED', 'Record class attendance for every class group on the exam date before submitting results.');
+      }
+      const presentRows = await prisma.attendanceRecord.findMany({
+        where: {
+          enrollmentId: { in: activeEnrollments.map(({ id }) => id) },
+          status: 'PRESENT',
+          attendanceSession: { schoolId: assessment.schoolId, termId: assessment.termId, date },
+        },
+        select: { enrollmentId: true },
+      });
+      const presentIds = new Set(presentRows.map(({ enrollmentId }) => enrollmentId));
+      requiredEnrollments = activeEnrollments.filter(({ id }) => presentIds.has(id));
+      examAbsentEnrollmentIds = activeEnrollments.filter(({ id }) => !presentIds.has(id)).map(({ id }) => id);
+      if (requiredEnrollments.length === 0 && !adminReopenedExam) {
+        throw httpError(409, 'EXAM_NO_PRESENT_STUDENTS', 'No students were marked PRESENT on the exam date.');
+      }
+    }
+
     const enteredResults = await prisma.assessmentResult.findMany({
       where: {
         assessmentId,
-        enrollmentId: { in: activeEnrollments.map((item) => item.id) },
+        enrollmentId: { in: requiredEnrollments.map((item) => item.id) },
       },
       select: { enrollmentId: true, mark: true, status: true },
     });
 
     const resultsByEnrollment = new Map(enteredResults.map((result) => [result.enrollmentId, result]));
     const maxMark = Number(assessment.maxMark);
-    const invalidCount = activeEnrollments.filter(({ id }) => {
+    const invalidCount = requiredEnrollments.filter(({ id }) => {
       const result = resultsByEnrollment.get(id);
+      if (adminReopenedExam && (!result || (result.status === 'ABSENT' && result.mark === null))) {
+        resetAbsentEnrollmentIds.push(id);
+        return false;
+      }
       if (!result || result.status !== 'PRESENT' || result.mark === null) return true;
       const mark = Number(result.mark);
       return !Number.isFinite(mark) || mark < 0 || mark > maxMark;
@@ -141,12 +189,26 @@ export async function transitionAssessment(
       throw httpError(
         409,
         'RESULTS_INCOMPLETE',
-        `Assessment was not submitted to admins: ${invalidCount} active enrollment(s) do not have a valid numeric mark. Every active student must be marked PRESENT with a mark from 0 to ${maxMark}; ABSENT and EXEMPT results do not satisfy this requirement.`,
+        `Assessment was not submitted to admins: ${invalidCount} ${isExamType(assessment.assessmentType) ? 'student(s) marked PRESENT on the exam date' : 'active enrollment(s)'} do not have a valid numeric mark. Every eligible student must have a mark from 0 to ${maxMark}${adminReopenedExam ? ' or remain marked ABSENT' : ''}.`,
       );
     }
   }
 
   return prisma.$transaction(async (tx) => {
+    if (examAbsentEnrollmentIds.length || resetAbsentEnrollmentIds.length) {
+      await tx.assessmentResult.createMany({
+        data: [...new Set([...examAbsentEnrollmentIds, ...resetAbsentEnrollmentIds])].map((enrollmentId) => ({
+          assessmentId,
+          enrollmentId,
+          mark: null,
+          status: 'ABSENT',
+          enteredById: actorId,
+          enteredAt: new Date(),
+          schoolId: assessment.schoolId,
+        })),
+        skipDuplicates: true,
+      });
+    }
     const updated = await tx.assessment.update({
       where: { id: assessmentId },
       data: { status: targetStatus },

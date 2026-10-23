@@ -12,8 +12,10 @@ import {
   getStudentById,
   updateStudent,
   updateStudentStatus,
-  getStudentClassDistribution
+  getStudentClassDistribution,
+  exportStudentsWithQr
 } from './students.service.js';
+import { downloadStudentQr } from './students.service.js';
 
 function validationError(res, error) {
   return res.status(400).json({
@@ -66,6 +68,7 @@ export async function listStudentsController(req, res, next) {
     const result = await listStudents(
       parsed.data,
       req.user.role === 'TEACHER' ? req.user.id : null,
+      req.schoolId,
     );
 
     return res.status(200).json({
@@ -91,6 +94,27 @@ export async function getStudentController(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+export async function downloadStudentQrController(req, res, next) {
+  try {
+    const image = await downloadStudentQr(req.params.id, req.schoolId);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="student-${image.admissionNumber}-qr.png"`);
+    return res.send(image.buffer);
+  } catch (error) { next(error); }
+}
+
+export async function exportStudentsWithQrController(req, res, next) {
+  try {
+    const parsed = listStudentsSchema.omit({ page: true, limit: true }).safeParse(req.query);
+    if (!parsed.success) return validationError(res, parsed.error);
+    const result = await exportStudentsWithQr(parsed.data, req.schoolId);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="student-ids-and-qr-codes.html"');
+    res.setHeader('X-Student-Count', String(result.count));
+    return res.send(result.html);
+  } catch (error) { next(error); }
 }
 
 export async function updateStudentController(req, res, next) {

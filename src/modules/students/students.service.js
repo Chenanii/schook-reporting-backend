@@ -1,5 +1,6 @@
 
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import QRCode from 'qrcode';
 import { prisma } from '../../lib/prisma.js';
 
 function httpError(statusCode, code, message) {
@@ -48,6 +49,47 @@ function handleDatabaseError(error) {
   throw error;
 }
 
+async function generateStudentId(tx, schoolId) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = Array.from(randomBytes(10), (byte) => alphabet[byte & 31]).join('');
+    const existing = await tx.student.findFirst({ where: { schoolId, admissionNumber: candidate }, select: { id: true } });
+    if (!existing) return candidate;
+  }
+  throw httpError(503, 'STUDENT_ID_GENERATION_FAILED', 'A unique student ID could not be generated. Please try again.');
+}
+
+export async function downloadStudentQr(studentId, schoolId) {
+  const student = await prisma.student.findFirst({ where: { id: studentId, schoolId }, select: { admissionNumber: true } });
+  if (!student) throw httpError(404, 'STUDENT_NOT_FOUND', 'Student not found.');
+  const buffer = await QRCode.toBuffer(student.admissionNumber, { type: 'png', width: 480, margin: 2, errorCorrectionLevel: 'M' });
+  return { admissionNumber: student.admissionNumber, buffer };
+}
+
+export async function exportStudentsWithQr(filters, schoolId) {
+  const students = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const result = await listStudents({ ...filters, page, limit: 100 }, null, schoolId);
+    students.push(...result.data);
+    totalPages = result.pagination.totalPages;
+    page += 1;
+  } while (page <= totalPages);
+
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
+  const rows = await Promise.all(students.map(async (student) => {
+    const enrollment = student.enrollments?.[0];
+    const name = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ');
+    const qr = await QRCode.toDataURL(student.admissionNumber, { width: 240, margin: 1, errorCorrectionLevel: 'M' });
+    return `<tr><td><strong>${escapeHtml(name)}</strong><br>${escapeHtml(student.admissionNumber)}</td><td>${escapeHtml(enrollment?.classLevel?.name)}${enrollment?.classGroup?.name ? ` · ${escapeHtml(enrollment.classGroup.name)}` : ''}</td><td>${escapeHtml(student.parents?.[0]?.parent?.phone)}</td><td>${escapeHtml(student.dateOfBirth?.toISOString?.().slice(0, 10) || student.dateOfBirth?.slice?.(0, 10))}</td><td>${escapeHtml(student.gender)}</td><td><img alt="QR code for ${escapeHtml(student.admissionNumber)}" src="${qr}"></td></tr>`;
+  }));
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Student IDs and QR codes</title><style>body{font:14px Arial,sans-serif;color:#1d2922}h1{font-size:22px}p{color:#58645d}table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd3cd;padding:8px;text-align:left}th{background:#eef3ef}img{width:100px;height:100px}tr{break-inside:avoid}@media print{button{display:none}thead{display:table-header-group}}</style></head><body><h1>Student information and QR codes</h1><p>${students.length} student${students.length === 1 ? '' : 's'} · Print this file or use the QR images to process student IDs.</p><button onclick="window.print()">Print</button><table><thead><tr><th>Student / ID</th><th>Class</th><th>Parent phone</th><th>Date of birth</th><th>Gender</th><th>QR code</th></tr></thead><tbody>${rows.join('')}</tbody></table></body></html>`;
+  return { html, count: students.length };
+}
+
 const studentIncludes = {
   _count: {
     select: {
@@ -71,7 +113,7 @@ export async function createStudent(data, actorId, req, schoolId) {
       }
       if (!classLevel) throw httpError(404, 'CLASS_LEVEL_NOT_FOUND', 'Class level not found for this school.');
 
-      const admissionNumber = `STU-${new Date().getFullYear()}-${randomUUID().toUpperCase()}`;
+      const admissionNumber = await generateStudentId(tx, schoolId);
       const student = await tx.student.create({
         data: {
           admissionNumber,
@@ -170,7 +212,7 @@ export async function createStudent(data, actorId, req, schoolId) {
   }
 }
 
-export async function listStudents(filters, teacherUserId = null) {
+export async function listStudents(filters, teacherUserId = null, schoolId = null) {
   const { page, limit, search, status, academicYearId, classLevelId, classGroupId, excludeEnrolledTermId } = filters;
   const teacherEnrollmentScope = [
     { classGroup: { assignments: { some: { teacher: { userId: teacherUserId } } } } },
@@ -185,6 +227,7 @@ export async function listStudents(filters, teacherUserId = null) {
   };
 
   const where = {
+    ...(schoolId ? { schoolId } : {}),
     ...(teacherUserId || excludeEnrolledTermId || academicYearId || classLevelId || classGroupId
       ? {
           enrollments: {

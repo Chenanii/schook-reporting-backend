@@ -6,7 +6,8 @@ import {
   getAttendanceSheetController,
   attendanceReportController,
   listAttendanceClassesController,
-  saveAttendanceController
+  saveAttendanceController,
+  scanAttendanceController
 } from './attendance.controller.js';
 
 export const attendanceRouter = Router();
@@ -16,3 +17,4 @@ attendanceRouter.get('/classes', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADT
 attendanceRouter.get('/reports', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'), attendanceReportController);
 attendanceRouter.get('/sheet', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER', 'TEACHER', 'FORM_TUTOR'), getAttendanceSheetController);
 attendanceRouter.put('/sheet', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER', 'TEACHER', 'FORM_TUTOR'), saveAttendanceController);
+attendanceRouter.post('/scan', authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER', 'TEACHER', 'FORM_TUTOR'), scanAttendanceController);
