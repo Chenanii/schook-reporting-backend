@@ -23,6 +23,13 @@ export const changePasswordSchema = z.object({
   }
 );
 
+export const updateProfileSchema = z.object({
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable(),
+  signatureDataUrl: z.string().max(700_000).nullable()
+}).strict();
+
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().email().transform((value) => value.toLowerCase())
 }).strict();

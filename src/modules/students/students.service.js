@@ -368,6 +368,12 @@ export async function getStudentById(id, teacherUserId = null) {
                   name: true,
                   levelOrder: true
                 }
+              },
+              formTutorAssignments: {
+                include: {
+                  teacher: { select: { firstName: true, lastName: true } },
+                  academicYear: { select: { id: true, name: true } }
+                }
               }
             }
           }

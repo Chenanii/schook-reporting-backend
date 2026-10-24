@@ -86,6 +86,84 @@ export async function getCurrentUser(userId) {
   return publicUser(user);
 }
 
+function validateSignatureDataUrl(value) {
+  if (value == null) return null;
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) throw httpError(400, 'INVALID_SIGNATURE_IMAGE', 'Upload a PNG, JPEG, or WebP signature image.');
+  const [, type, encoded] = match;
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length > 500 * 1024) throw httpError(413, 'SIGNATURE_IMAGE_TOO_LARGE', 'The signature image must be 500 KB or smaller.');
+  if (bytes.toString('base64') !== encoded) throw httpError(400, 'INVALID_SIGNATURE_IMAGE', 'The signature image is not valid base64 data.');
+
+  const validImage = type === 'png'
+    ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    : type === 'jpeg'
+      ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+  if (!validImage) throw httpError(400, 'INVALID_SIGNATURE_IMAGE', 'The uploaded file does not match its image type.');
+  return value;
+}
+
+export async function getUserProfile(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { teacher: { select: { staffNumber: true } } }
+  });
+  if (!user || user.status !== 'ACTIVE') throw httpError(401, 'ACCOUNT_UNAVAILABLE', 'This account is unavailable.');
+  return { ...publicUser(user), signatureDataUrl: user.signatureDataUrl, staffNumber: user.teacher?.staffNumber || null };
+}
+
+export async function updateUserProfile(userId, data, req) {
+  const signatureDataUrl = validateSignatureDataUrl(data.signatureDataUrl);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        include: { teacher: { select: { id: true } }, parents: { select: { id: true } } }
+      });
+      if (!current || current.status !== 'ACTIVE') throw httpError(401, 'ACCOUNT_UNAVAILABLE', 'This account is unavailable.');
+      if (current.teacher && !data.email) throw httpError(400, 'TEACHER_EMAIL_REQUIRED', 'A teacher account must have an email address.');
+      if (current.role === 'PARENT' && data.email?.toLowerCase() !== current.email?.toLowerCase()) {
+        throw httpError(400, 'PARENT_EMAIL_UPDATE_UNAVAILABLE', 'Parent email changes must be verified through parent account setup.');
+      }
+
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          email: data.email,
+          signatureDataUrl
+        },
+        include: { teacher: { select: { staffNumber: true } } }
+      });
+      if (current.teacher) {
+        await tx.teacher.updateMany({ where: { userId }, data: { firstName: data.firstName, lastName: data.lastName, email: data.email } });
+      }
+      if (current.parents.length) {
+        await tx.parent.updateMany({ where: { userId }, data: { firstName: data.firstName, lastName: data.lastName } });
+      }
+      await tx.auditLog.create({
+        data: {
+          actorId: userId,
+          action: 'USER_PROFILE_UPDATED',
+          entityType: 'User',
+          entityId: userId,
+          oldValues: { firstName: current.firstName, lastName: current.lastName, email: current.email, hasSignature: Boolean(current.signatureDataUrl) },
+          newValues: { firstName: updated.firstName, lastName: updated.lastName, email: updated.email, hasSignature: Boolean(updated.signatureDataUrl) },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')?.slice(0, 500),
+          schoolId: req.schoolId || null
+        }
+      });
+      return { ...publicUser(updated), signatureDataUrl: updated.signatureDataUrl, staffNumber: updated.teacher?.staffNumber || null };
+    });
+  } catch (error) {
+    if (error.code === 'P2002') throw httpError(409, 'DUPLICATE_VALUE', 'That email address is already in use.');
+    throw error;
+  }
+}
+
 export async function changePassword({
   userId,
   currentPassword,

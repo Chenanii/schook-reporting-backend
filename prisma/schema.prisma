@@ -237,6 +237,7 @@ model User {
   passwordHash String
   firstName    String
   lastName     String
+  signatureDataUrl String?      @db.Text
   role         UserRole     @default(TEACHER)
   status       RecordStatus @default(ACTIVE)
   schoolId     String?

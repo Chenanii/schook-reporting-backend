@@ -2,6 +2,8 @@ import { Router } from 'express';
 import {
   loginController,
   meController,
+  profileController,
+  updateProfileController,
   changePasswordController,
   forgotPasswordController,
   resetPasswordController
@@ -27,6 +29,8 @@ authRouter.post('/reset-password', passwordResetRateLimit, resetPasswordControll
 authRouter.post('/parent-portal/verification', parentPortalRateLimit, requestParentPortalVerificationController);
 authRouter.post('/parent-portal/register', parentPortalRegistrationRateLimit, createParentPortalAccountController);
 authRouter.get('/me', authenticate, meController);
+authRouter.get('/profile', authenticate, profileController);
+authRouter.patch('/profile', authenticate, updateProfileController);
 authRouter.post(
   '/change-password',
   authenticate,

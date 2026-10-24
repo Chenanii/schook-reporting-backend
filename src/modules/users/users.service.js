@@ -191,14 +191,79 @@ export async function listStaff(filters) {
 export async function getStaffById(id) {
   const user = await prisma.user.findFirst({
     where: { id, role: { in: manageableRoles } },
-    include: { teacher: true }
+    include: {
+      teacher: {
+        include: {
+          assignments: {
+            include: {
+              classGroup: { include: { classLevel: { select: { name: true } } } },
+              classSubject: { include: { classLevel: { select: { name: true } } } },
+              subject: { select: { name: true, code: true } },
+              subjectStream: { include: { classLevel: { select: { name: true } } } },
+              term: { include: { academicYear: { select: { name: true } } } }
+            },
+            orderBy: [{ term: { academicYear: { startDate: 'desc' } } }, { term: { sequence: 'desc' } }]
+          },
+          formTutorAssignments: {
+            include: {
+              classGroup: { include: { classLevel: { select: { name: true } } } },
+              academicYear: { select: { name: true } }
+            },
+            orderBy: { academicYear: { startDate: 'desc' } }
+          }
+        }
+      }
+    }
   });
 
   if (!user) {
     throw httpError(404, 'STAFF_NOT_FOUND', 'Staff account not found.');
   }
 
-  return publicUser(user);
+  const schoolId = user.schoolId || user.teacher?.schoolId;
+  const terms = user.teacher && schoolId ? await prisma.term.findMany({
+    where: { schoolId },
+    include: { academicYear: { select: { name: true, isCurrent: true } } },
+    orderBy: [{ academicYear: { startDate: 'desc' } }, { sequence: 'desc' }]
+  }) : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const currentTerm = terms.find((term) => term.academicYear.isCurrent &&
+    term.startDate.toISOString().slice(0, 10) <= today && term.endDate.toISOString().slice(0, 10) >= today)
+    || terms.find((term) => term.academicYear.isCurrent && term.status === 'OPEN')
+    || terms.find((term) => term.academicYear.isCurrent)
+    || terms.find((term) => term.startDate.toISOString().slice(0, 10) <= today && term.endDate.toISOString().slice(0, 10) >= today)
+    || null;
+
+  return {
+    ...publicUser(user),
+    teacher: user.teacher ? {
+      ...publicUser(user).teacher,
+      assignments: user.teacher.assignments.map((assignment) => ({
+        id: assignment.id,
+        termId: assignment.term.id,
+        classLevel: assignment.classGroup?.classLevel?.name || assignment.subjectStream?.classLevel?.name || assignment.classSubject?.classLevel?.name || '—',
+        classGroup: assignment.classGroup?.name || null,
+        subject: assignment.subject?.name || '—',
+        subjectCode: assignment.subject?.code || null,
+        stream: assignment.subjectStream?.name || null,
+        term: assignment.term.name,
+        academicYear: assignment.term.academicYear.name
+      })),
+      formTutorAssignments: user.teacher.formTutorAssignments.map((assignment) => ({
+        id: assignment.id,
+        classLevel: assignment.classGroup.classLevel.name,
+        classGroup: assignment.classGroup.name,
+        academicYear: assignment.academicYear.name
+      })),
+      terms: terms.map((term) => ({
+        id: term.id,
+        name: term.name,
+        sequence: term.sequence,
+        academicYear: term.academicYear.name
+      })),
+      currentTermId: currentTerm?.id || null
+    } : null
+  };
 }
 
 export async function updateStaff(id, data, actorId, req) {

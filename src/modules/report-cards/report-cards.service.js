@@ -163,14 +163,14 @@ async function loadCards(enrollments, { termId, schoolId, classLevelId, publicat
     }),
     prisma.school.findUnique({ where: { id: schoolId }, select: schoolSelect }),
     getGradeScaleForClassLevel(prisma, classLevelId),
-    prisma.formTutorAssignment.findFirst({ where: { classGroupId: sampleEnrollment.classGroupId, academicYearId: sampleEnrollment.term.academicYearId, schoolId }, include: { teacher: { select: { firstName: true, lastName: true } } } }),
-    prisma.user.findFirst({ where: { schoolId, role: 'HEADTEACHER', status: 'ACTIVE' }, select: { firstName: true, lastName: true } }),
+    prisma.formTutorAssignment.findFirst({ where: { classGroupId: sampleEnrollment.classGroupId, academicYearId: sampleEnrollment.term.academicYearId, schoolId }, include: { teacher: { select: { firstName: true, lastName: true, user: { select: { signatureDataUrl: true } } } } } }),
+    prisma.user.findFirst({ where: { schoolId, role: 'HEADTEACHER', status: 'ACTIVE' }, select: { firstName: true, lastName: true, signatureDataUrl: true } }),
     getReportCardDetails(enrollmentIds, 'END_OF_TERM'),
   ]);
   const detailsByEnrollment = new Map(detailRows.map(({ enrollmentId, ...details }) => [enrollmentId, details]));
   const formTutorName = formTutor ? `${formTutor.teacher.firstName} ${formTutor.teacher.lastName}`.trim() : null;
   const headteacherName = headteacher ? `${headteacher.firstName} ${headteacher.lastName}`.trim() : null;
-  const school = { ...baseSchool, classTeacherSignerName: formTutorName || baseSchool.classTeacherSignerName, headteacherSignerName: headteacherName || baseSchool.headteacherSignerName };
+  const school = { ...baseSchool, classTeacherSignerName: formTutorName || baseSchool.classTeacherSignerName, headteacherSignerName: headteacherName || baseSchool.headteacherSignerName, classTeacherSignatureDataUrl: formTutor?.teacher.user?.signatureDataUrl || null, headteacherSignatureDataUrl: headteacher?.signatureDataUrl || null };
   const classSubjectsByLevel = new Map();
   classSubjects.forEach((item) => { const list = classSubjectsByLevel.get(item.classLevelId) || []; list.push(item); classSubjectsByLevel.set(item.classLevelId, list); });
   const streamsByEnrollment = new Map();

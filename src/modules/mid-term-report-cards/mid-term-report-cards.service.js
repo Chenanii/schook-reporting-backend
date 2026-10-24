@@ -404,15 +404,15 @@ async function buildMidTermReportCards(enrollments, { termId, schoolId, classLev
     prisma.school.findUnique({ where: { id: schoolId }, select: reportSchoolSelect }),
     loadBoundaries(gradeScale),
     loadMidTermContext(enrollments, { termId, schoolId }),
-    prisma.formTutorAssignment.findFirst({ where: { classGroupId: firstEnrollment.classGroupId, academicYearId: firstEnrollment.term.academicYearId, schoolId }, include: { teacher: { select: { firstName: true, lastName: true } } } }),
-    prisma.user.findFirst({ where: { schoolId, role: 'HEADTEACHER', status: 'ACTIVE' }, select: { firstName: true, lastName: true } }),
+    prisma.formTutorAssignment.findFirst({ where: { classGroupId: firstEnrollment.classGroupId, academicYearId: firstEnrollment.term.academicYearId, schoolId }, include: { teacher: { select: { firstName: true, lastName: true, user: { select: { signatureDataUrl: true } } } } } }),
+    prisma.user.findFirst({ where: { schoolId, role: 'HEADTEACHER', status: 'ACTIVE' }, select: { firstName: true, lastName: true, signatureDataUrl: true } }),
     prisma.reportPublication.findFirst({ where: { termId, classGroupId: firstEnrollment.classGroupId, schoolId, type: 'MID_TERM' }, select: { publishedAt: true } }),
     getReportCardDetails(enrollments.map(({ id }) => id), 'MID_TERM'),
   ]);
   const detailsByEnrollment = new Map(detailRows.map(({ enrollmentId, ...details }) => [enrollmentId, details]));
   const formTutorName = formTutor ? `${formTutor.teacher.firstName} ${formTutor.teacher.lastName}`.trim() : null;
   const headteacherName = headteacher ? `${headteacher.firstName} ${headteacher.lastName}`.trim() : null;
-  const school = { ...baseSchool, classTeacherSignerName: formTutorName || baseSchool.classTeacherSignerName, headteacherSignerName: headteacherName || baseSchool.headteacherSignerName };
+  const school = { ...baseSchool, classTeacherSignerName: formTutorName || baseSchool.classTeacherSignerName, headteacherSignerName: headteacherName || baseSchool.headteacherSignerName, classTeacherSignatureDataUrl: formTutor?.teacher.user?.signatureDataUrl || null, headteacherSignatureDataUrl: headteacher?.signatureDataUrl || null };
   const issuedAt = publication?.publishedAt || new Date();
 
   return enrollments.map((enrollment) => {

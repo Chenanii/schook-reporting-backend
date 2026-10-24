@@ -2,7 +2,8 @@ import {
   loginSchema,
   changePasswordSchema,
   forgotPasswordSchema,
-  resetPasswordSchema
+  resetPasswordSchema,
+  updateProfileSchema
 } from './auth.validation.js';
 
 import {
@@ -10,7 +11,9 @@ import {
   getCurrentUser,
   changePassword,
   requestPasswordReset,
-  resetPassword
+  resetPassword,
+  getUserProfile,
+  updateUserProfile
 } from './auth.service.js';
 
 function validate(schema, body, res) {
@@ -54,6 +57,26 @@ export async function meController(req, res, next) {
     res.json({ success: true, data });
   } catch (error) {
     next(error);
+  }
+}
+
+export async function profileController(req, res, next) {
+  try {
+    const data = await getUserProfile(req.user.id);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateProfileController(req, res, next) {
+  try {
+    const input = validate(updateProfileSchema, req.body, res);
+    if (!input) return;
+    const data = await updateUserProfile(req.user.id, input, req);
+    return res.json({ success: true, message: 'Your profile was updated.', data });
+  } catch (error) {
+    return next(error);
   }
 }
 
