@@ -33,26 +33,19 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/school-reporting-backend:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/school-reporting-backend:${{ github.sha }}
 
-      # - name: Prepare SSH access
-        # env:
-        #   VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-        #   VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-        # run: |
-        #   mkdir -p "$HOME/.ssh"
-        #   printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
-        #   printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-        #   chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
-
       - name: Prepare SSH access
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
+          test -n "$VPS_SSH_KEY" || { echo "Missing VPS_SSH_KEY repository secret" >&2; exit 1; }
+          test -n "$VPS_KNOWN_HOSTS" || { echo "Missing VPS_KNOWN_HOSTS repository secret" >&2; exit 1; }
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
           printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"
           printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/deploy_key" >/dev/null
 
       - name: Install deployment files on VPS
         env:
