@@ -29,6 +29,7 @@ jobs:
         with:
           context: .
           push: true
+          no-cache: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/school-reporting-backend:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/school-reporting-backend:${{ github.sha }}
