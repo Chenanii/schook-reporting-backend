@@ -63,13 +63,16 @@ function calculateSubject(subject, assessments, boundaries, scoreOutOf, publishe
   const scoreLine = (line) => line.result.status === 'ABSENT' ? 0
     : line.result.status === 'EXEMPT' ? null
       : percent(Number(line.result.mark), Number(line.maxMark));
-  const componentScores = [...coursework, ...midTerms].map(scoreLine).filter((value) => value !== null && Number.isFinite(value));
+  const courseworkScores = coursework.map(scoreLine).filter((value) => value !== null && Number.isFinite(value));
+  const midTermScores = midTerms.map(scoreLine).filter((value) => value !== null && Number.isFinite(value));
   const finalScore = finals.length === 1 && finals[0].result.status !== 'EXEMPT' ? scoreLine(finals[0]) : null;
-  if (!componentScores.length) issues.push('Coursework and mid-term marks cannot be calculated');
+  if (!courseworkScores.length) issues.push('Coursework marks cannot be calculated');
+  if (!midTermScores.length) issues.push('Mid-term exam marks cannot be calculated');
   if (finalScore === null) issues.push('Final exam mark is missing or exempt');
-  const componentAverage = average(componentScores);
-  const finalMark = componentAverage !== null && finalScore !== null
-    ? Number((componentAverage * 0.4 + finalScore * 0.6).toFixed(2))
+  const courseworkAverage = average(courseworkScores);
+  const midTermAverage = average(midTermScores);
+  const finalMark = courseworkAverage !== null && midTermAverage !== null && finalScore !== null
+    ? Number((courseworkAverage * 0.2 + midTermAverage * 0.3 + finalScore * 0.5).toFixed(2))
     : null;
   const boundary = finalMark === null ? null : gradeFor(boundaries, finalMark);
   if (finalMark !== null && !boundary) issues.push('No grade boundary matches the calculated mark');
@@ -84,7 +87,8 @@ function calculateSubject(subject, assessments, boundaries, scoreOutOf, publishe
     grade: boundary?.grade ?? null,
     gradeDescription: boundary?.description ?? null,
     teacherComment: lines.map((line) => line.result.teacherComment).find(Boolean) ?? null,
-    courseworkAndMidTermAverage: componentAverage === null ? null : Number(componentAverage.toFixed(2)),
+    courseworkAverage: courseworkAverage === null ? null : Number(courseworkAverage.toFixed(2)),
+    midTermExamPercent: midTermAverage === null ? null : Number(midTermAverage.toFixed(2)),
     finalExamPercent: finalScore === null ? null : Number(finalScore.toFixed(2)),
     issues,
   };

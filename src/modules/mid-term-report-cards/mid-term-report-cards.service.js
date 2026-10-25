@@ -9,7 +9,7 @@ import { createNotifications, getStudentAndParentUserIds } from '../notification
 /* -------------------------------------------------------------------------- */
 
 // Every subject needs at least this many coursework assessments plus the mid-term exam.
-// The mid-term grade is the plain average of coursework and mid-term exam percentages.
+// Coursework contributes 40% and mid-term exams contribute 60% to the mid-term grade.
 export const MID_TERM_POLICY = Object.freeze({
   minContinuousAssessments: 2,
 });
@@ -166,12 +166,11 @@ function buildSubjectMidTerm({ subjectId, subject }, results, boundaries, scoreO
   const continuousPercent = averageOf(averageablePercents(continuous));
   const examPercent = averageOf(averageablePercents(exams));
 
-  // Treat coursework and mid-term exams as two equally weighted components:
-  // average all coursework first, average mid-term exams, then average those
-  // component averages. This prevents a subject with more coursework entries
-  // from outweighing its mid-term exam.
-  const componentAverages = [continuousPercent, examPercent].filter((value) => value !== null);
-  const averagePercent = averageOf(componentAverages);
+  // Average each assessment type first so additional assessments do not change
+  // the configured 40% coursework and 60% mid-term exam weighting.
+  const averagePercent = continuousPercent !== null && examPercent !== null
+    ? continuousPercent * 0.4 + examPercent * 0.6
+    : null;
   const boundary = averagePercent === null ? null : gradeFor(boundaries, averagePercent);
   if (!boundary) {
     issues.push({ code: 'GRADE_MISSING', message: 'no grade could be calculated' });
