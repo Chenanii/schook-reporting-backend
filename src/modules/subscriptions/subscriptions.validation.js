@@ -4,7 +4,7 @@ const planFields = {
   code: z.string().trim().min(2).max(50).regex(/^[a-z0-9][a-z0-9_-]*$/),
   name: z.string().trim().min(2).max(100),
   description: z.string().trim().max(500).nullable().optional(),
-  interval: z.enum(['MONTHLY', 'YEARLY']),
+  interval: z.literal('TERM'),
   priceMinor: z.number().int().min(0).max(2147483647),
   currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).pipe(z.string().regex(/^[A-Z]{3}$/)),
   trialDays: z.number().int().min(0).max(90).default(14),

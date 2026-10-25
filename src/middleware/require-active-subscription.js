@@ -54,8 +54,8 @@ export async function requireActiveSubscription(req, res, next) {
         schoolId,
         OR: [
           { status: 'TRIALING', trialEndsAt: { gt: now } },
-          { status: 'ACTIVE', OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
-          { status: 'CANCELED', currentPeriodEnd: { gt: now } }
+          { status: 'ACTIVE', currentPeriodStart: { lte: now }, OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
+          { status: 'CANCELED', currentPeriodStart: { lte: now }, currentPeriodEnd: { gt: now } }
         ]
       },
       select: { id: true }
@@ -106,8 +106,8 @@ export function requirePlanCapacity(resource) {
           schoolId: req.schoolId,
           OR: [
             { status: 'TRIALING', trialEndsAt: { gt: now } },
-            { status: 'ACTIVE', OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
-            { status: 'CANCELED', currentPeriodEnd: { gt: now } }
+            { status: 'ACTIVE', currentPeriodStart: { lte: now }, OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gt: now } }] },
+            { status: 'CANCELED', currentPeriodStart: { lte: now }, currentPeriodEnd: { gt: now } }
           ]
         },
         include: { plan: { select: { maxStudents: true, maxStaff: true } } },
@@ -144,4 +144,59 @@ export function requirePlanCapacity(resource) {
       return next(error);
     }
   };
+}
+
+// Keep report generation available through most of the paid term, then block it during the final 21 days.
+export async function requireReportsBeforeTermEnd(req, res, next) {
+  try {
+    const schoolId = req.schoolId || req.user?.schoolId;
+    if (!schoolId) return next();
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const term = await prisma.term.findFirst({
+      where: {
+        schoolId, startDate: { lte: now }, endDate: { gte: today },
+        status: { notIn: ['DRAFT', 'CLOSED'] }
+      },
+      orderBy: { startDate: 'desc' }
+    });
+    if (!term) return next();
+
+    // Schools that already paid for this term keep report access through term end.
+    const paid = await prisma.subscriptionPayment.findFirst({
+      where: { schoolId, status: 'SUCCESS', subscription: { billingTermId: term.id } },
+      select: { id: true }
+    });
+    if (paid) return next();
+
+    const unpaidPlan = await prisma.schoolSubscription.findFirst({
+      where: {
+        schoolId,
+        status: { in: ['TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELED', 'PENDING_PAYMENT'] },
+        plan: { priceMinor: { gt: 0 } },
+        OR: [{ billingTermId: term.id }, { billingTermId: null }]
+      },
+      select: { id: true }
+    });
+    if (!unpaidPlan) return next();
+
+    const termEnd = term.endDate;
+    const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const endDate = new Date(termEnd);
+    const endOfTermDay = Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate());
+    const daysRemaining = Math.ceil((endOfTermDay - startOfToday) / (24 * 60 * 60 * 1000));
+    if (daysRemaining > 0 && daysRemaining <= 21) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'REPORTS_RESTRICTED_NEAR_TERM_END',
+          message: 'Mid-term and end-of-term reports are restricted during the final three weeks of the subscription term.',
+          details: { daysRemaining, termEndDate: termEnd }
+        }
+      });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 }

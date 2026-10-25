@@ -48,7 +48,8 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json({ limit: '1mb' }));
+// Preserve the exact bytes for PayChangu's HMAC webhook signature validation.
+app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(`${env.API_PREFIX}`, adminAuditMiddleware);
 app.use(`${env.API_PREFIX}/academic-years`, academicYearsRouter);

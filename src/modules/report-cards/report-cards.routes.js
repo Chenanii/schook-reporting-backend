@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
-import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
+import { requireActiveSubscription, requireReportsBeforeTermEnd } from '../../middleware/require-active-subscription.js';
 import { saveReportCardDetailsController } from './report-card-details.controller.js';
 
 import {
@@ -13,7 +13,7 @@ import {
 
 export const reportCardsRouter = Router();
 
-reportCardsRouter.use(authenticate, requireActiveSubscription);
+reportCardsRouter.use(authenticate, requireActiveSubscription, requireReportsBeforeTermEnd);
 
 reportCardsRouter.use(
   authorize(
