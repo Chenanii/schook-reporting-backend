@@ -67,8 +67,9 @@ jobs:
 
       - name: Pull images and restart the application
         env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
         run: |
-          ssh -i "$HOME/.ssh/deploy_key" -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "cd '$VPS_DEPLOY_PATH' && docker compose pull && docker compose up -d --remove-orphans && docker compose restart frontend"
+          ssh -i "$HOME/.ssh/deploy_key" -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "cd '$VPS_DEPLOY_PATH' && export DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' && docker compose pull && docker compose up -d --remove-orphans && docker compose restart frontend"
