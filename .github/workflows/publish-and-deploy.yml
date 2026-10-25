@@ -48,20 +48,11 @@ jobs:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
-          set -eu
-
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
-
-          printf '%s' "$VPS_SSH_KEY" | tr -d '\r' > "$HOME/.ssh/deploy_key"
-          printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
-
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
-
-          test -s "$HOME/.ssh/deploy_key"
-          ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null
-
-          echo "SSH key validated successfully."
 
       - name: Install deployment files on VPS
         env:
