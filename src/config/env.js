@@ -12,8 +12,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters."),
   JWT_EXPIRES_IN: z.string().default("8h"),
 
-  CORS_ORIGINS: z.string().default("http://localhost:5173"),
-  APP_NAME: z.string().default("School Reporting System"),
+  CORS_ORIGINS: z.string().default("https://nexaschools.dimtmw.com,http://localhost:5173"),
+
+  APP_NAME: z.string().default("Nexa Schools"),
 
   MAIL_HOST: z.string().optional(),
   MAIL_PORT: z.coerce.number().int().positive().default(587),
@@ -42,12 +43,12 @@ const envSchema = z.object({
   TEACHER_INVITATION_BASE_URL: z
     .string()
     .url()
-    .default("http://localhost:5173/accept-invitation"),
+    .default("https://nexaschools.dimtmw.com/accept-invitation"),
   TEACHER_INVITATION_TTL_HOURS: z.coerce.number().int().positive().default(48),
   PASSWORD_RESET_BASE_URL: z
     .string()
     .url()
-    .default("http://localhost:5173/reset-password"),
+    .default("https://nexaschools.dimtmw.com/reset-password"),
   PAYCHANGU_MODE: z.enum(["test", "live"]).default("test"),
   // These values come from the backend .env file; never hardcode credentials here.
   PAYCHANGU_SECRET_KEY: z.string().optional(),
@@ -55,11 +56,11 @@ const envSchema = z.object({
   PAYCHANGU_CALLBACK_URL: z
     .string()
     .url()
-    .default("http://localhost:4000/api/v1/subscriptions/paychangu/callback"),
+    .default("https://nexaschools.dimtmw.com/api/v1/subscriptions/paychangu/callback"),
   PAYCHANGU_RETURN_URL: z
     .string()
     .url()
-    .default("http://localhost:5173/subscriptions"),
+    .default("https://nexaschools.dimtmw.com/subscriptions"),
 }).superRefine((config, context) => {
   if (config.NODE_ENV !== 'production') return;
   for (const key of ['PAYCHANGU_CALLBACK_URL', 'PAYCHANGU_RETURN_URL']) {

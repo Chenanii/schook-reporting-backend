@@ -1,0 +1,81 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: docker.io/${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/school-reporting-backend:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env}
+      APP_NAME: ${APP_NAME:-School Reporting System}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_SECURE: ${MAIL_SECURE:-false}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@example.com}
+      TEXTBEE_API_KEY: ${TEXTBEE_API_KEY:-}
+      TEXTBEE_DEVICE_ID: ${TEXTBEE_DEVICE_ID:-}
+      TEXTBEE_DEFAULT_COUNTRY_CODE: ${TEXTBEE_DEFAULT_COUNTRY_CODE:-265}
+      TEACHER_INVITATION_BASE_URL: ${TEACHER_INVITATION_BASE_URL:?Set TEACHER_INVITATION_BASE_URL in .env}
+      TEACHER_INVITATION_TTL_HOURS: ${TEACHER_INVITATION_TTL_HOURS:-48}
+      PASSWORD_RESET_BASE_URL: ${PASSWORD_RESET_BASE_URL:?Set PASSWORD_RESET_BASE_URL in .env}
+      PAYCHANGU_MODE: ${PAYCHANGU_MODE:-test}
+      PAYCHANGU_SECRET_KEY: ${PAYCHANGU_SECRET_KEY:-}
+      PAYCHANGU_WEBHOOK_SECRET: ${PAYCHANGU_WEBHOOK_SECRET:-}
+      PAYCHANGU_CALLBACK_URL: ${PAYCHANGU_CALLBACK_URL:?Set PAYCHANGU_CALLBACK_URL in .env}
+      PAYCHANGU_RETURN_URL: ${PAYCHANGU_RETURN_URL:?Set PAYCHANGU_RETURN_URL in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
+
+  frontend:
+    image: docker.io/${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/school-reporting-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
