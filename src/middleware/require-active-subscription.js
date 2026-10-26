@@ -11,6 +11,19 @@ function isSetupRoute(req) {
   return [...setupPrefixes].some((prefix) => base === `/api/v1${prefix}` || base.endsWith(prefix));
 }
 
+function isMidTermReportRoute(req) {
+  return (req.baseUrl || '').endsWith('/mid-term-report-cards');
+}
+
+function isReportReadinessCheck(req) {
+  const base = req.baseUrl || '';
+  return req.method === 'GET'
+    && req.query?.allowIncomplete === 'true'
+    && /^\/terms\/[^/]+\/class-groups\/[^/]+$/.test(req.path || '')
+    && base.startsWith('/api/v1/')
+    && base.endsWith('/report-cards');
+}
+
 export async function requireActiveSubscription(req, res, next) {
   try {
     if (req.user?.role === 'SUPER_ADMIN') {
@@ -68,7 +81,7 @@ export async function requireActiveSubscription(req, res, next) {
         })
       : null;
 
-    if (!subscription && !setupOnlyAccess) {
+    if (!subscription && !setupOnlyAccess && !isReportReadinessCheck(req) && !isMidTermReportRoute(req)) {
       return res.status(402).json({
         success: false,
         error: {
@@ -149,6 +162,8 @@ export function requirePlanCapacity(resource) {
 // Keep report generation available through most of the paid term, then block it during the final 21 days.
 export async function requireReportsBeforeTermEnd(req, res, next) {
   try {
+    const base = req.baseUrl || '';
+    if (isReportReadinessCheck(req) || isMidTermReportRoute(req)) return next();
     const schoolId = req.schoolId || req.user?.schoolId;
     if (!schoolId) return next();
     const now = new Date();
@@ -190,7 +205,7 @@ export async function requireReportsBeforeTermEnd(req, res, next) {
         success: false,
         error: {
           code: 'REPORTS_RESTRICTED_NEAR_TERM_END',
-          message: 'Mid-term and end-of-term reports are restricted during the final three weeks of the subscription term.',
+          message: 'Subscription payment has not been confirmed. Please make payment before viewing or publishing reports during the final three weeks of the term.',
           details: { daysRemaining, termEndDate: termEnd }
         }
       });

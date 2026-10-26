@@ -38,6 +38,6 @@ midTermReportCardsRouter.get(
 );
 midTermReportCardsRouter.post(
   '/terms/:termId/class-groups/:classGroupId/publish',
-  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'),
+  authorize('SUPER_ADMIN', 'SCHOOL_ADMIN'),
   publishClassGroupMidTermReportsController,
 );

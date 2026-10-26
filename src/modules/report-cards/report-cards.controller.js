@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { getClassGroupReportCards, getEndOfTermReportPublication, getReportCardPreview, publishClassGroupEndOfTermReports, unpublishClassGroupEndOfTermReports } from './report-cards.service.js';
+import { getTermPaymentAccess } from '../../lib/term-payment-access.js';
+import { reportReadinessSummary } from '../../lib/report-readiness-summary.js';
+import { getClassGroupReportCards, getEndOfTermReportPublication, getReportCardPreview, hasFinalExamResultsStarted, publishClassGroupEndOfTermReports, unpublishClassGroupEndOfTermReports } from './report-cards.service.js';
 
 const querySchema = z.object({
   allowIncomplete: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
@@ -42,18 +44,26 @@ export async function getClassGroupReportCardsController(req, res) {
     classGroupId: req.params.classGroupId,
     schoolId: req.schoolId,
   });
+  const paymentAccess = await getTermPaymentAccess(req.schoolId, req.params.termId);
+  const finalExamResultsStarted = await hasFinalExamResultsStarted({
+    termId: req.params.termId,
+    classGroupId: req.params.classGroupId,
+    schoolId: req.schoolId,
+  });
   return res.status(200).json({
     success: true,
     message: 'Class group report cards retrieved successfully.',
-    data: reportCards,
+    data: query.data.allowIncomplete ? reportReadinessSummary(reportCards) : reportCards,
     publication,
+    paymentRequired: paymentAccess.paymentRequired,
+    finalExamResultsStarted,
   });
 }
 
 export async function publishClassGroupEndOfTermReportsController(req, res, next) {
   try {
-    if (!['SCHOOL_ADMIN', 'SUPER_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'].includes(req.user.role)) {
-      return res.status(403).json({ success: false, error: { code: 'REPORT_PUBLICATION_FORBIDDEN', message: 'Only school administrators and examination staff can publish end-of-term reports.' } });
+    if (!['SCHOOL_ADMIN', 'SUPER_ADMIN'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: { code: 'REPORT_PUBLICATION_FORBIDDEN', message: 'Only a school administrator can publish end-of-term reports. The headteacher must finalize the term first.' } });
     }
     const data = await publishClassGroupEndOfTermReports({ termId: req.params.termId, classGroupId: req.params.classGroupId, schoolId: req.schoolId, actorId: req.user.id, req });
     return res.status(200).json({ success: true, message: 'End-of-term reports published successfully.', data });
@@ -64,8 +74,8 @@ export async function publishClassGroupEndOfTermReportsController(req, res, next
 
 export async function unpublishClassGroupEndOfTermReportsController(req, res, next) {
   try {
-    if (!['SCHOOL_ADMIN', 'SUPER_ADMIN', 'HEADTEACHER', 'ACADEMIC_ADMIN', 'EXAMS_OFFICER'].includes(req.user.role)) {
-      return res.status(403).json({ success: false, error: { code: 'REPORT_PUBLICATION_FORBIDDEN', message: 'Only school administrators and examination staff can unpublish end-of-term reports.' } });
+    if (!['SCHOOL_ADMIN', 'SUPER_ADMIN'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: { code: 'REPORT_PUBLICATION_FORBIDDEN', message: 'Only a school administrator can unpublish end-of-term reports.' } });
     }
     const data = await unpublishClassGroupEndOfTermReports({ termId: req.params.termId, classGroupId: req.params.classGroupId, schoolId: req.schoolId, actorId: req.user.id, req });
     return res.status(200).json({ success: true, message: data.unpublished ? 'End-of-term reports unpublished successfully.' : 'These end-of-term reports were already unpublished.', data });

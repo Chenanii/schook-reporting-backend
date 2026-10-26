@@ -11,7 +11,7 @@ import {
   listSchools, updateSchoolStatus, listSubscriptions, requestPlanChange,
   getSchoolProfile, updateSchoolProfile, startSubscriptionCheckout,
   verifySubscriptionPayment, listSchoolPayments, listAllSubscriptionPayments,
-  getTermExpiryReminder
+  getTermExpiryReminder, checkSchoolNameAvailability
 } from './subscriptions.service.js';
 
 function validationError(res, error) {
@@ -55,6 +55,15 @@ export async function registerSchoolController(req, res, next) {
   const parsed = schoolSignupSchema.safeParse(req.body);
   if (!parsed.success) return validationError(res, parsed.error);
   try { return res.status(201).json({ success: true, data: await registerSchool(parsed.data) }); }
+  catch (error) { return next(error); }
+}
+
+export async function checkSchoolNameAvailabilityController(req, res, next) {
+  const name = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+  if (name.length < 2 || name.length > 160) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_SCHOOL_NAME', message: 'Enter a school name between 2 and 160 characters.' } });
+  }
+  try { return res.json({ success: true, data: await checkSchoolNameAvailability(name) }); }
   catch (error) { return next(error); }
 }
 

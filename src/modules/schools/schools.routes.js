@@ -1,17 +1,18 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
-import { schoolSignupRateLimit } from '../../middleware/school-signup-rate-limit.js';
+import { schoolSignupRateLimit, schoolNameAvailabilityRateLimit } from '../../middleware/school-signup-rate-limit.js';
 import { requireActiveSubscription } from '../../middleware/require-active-subscription.js';
 import { schoolSetupStatusController } from './school-setup.controller.js';
 import {
   registerSchoolController, listSchoolsController, updateSchoolStatusController,
-  currentSchoolController, updateCurrentSchoolController
+  currentSchoolController, updateCurrentSchoolController, checkSchoolNameAvailabilityController
 } from '../subscriptions/subscriptions.controller.js';
 
 export const schoolsRouter = Router();
 
 schoolsRouter.post('/signup', schoolSignupRateLimit, registerSchoolController);
+schoolsRouter.get('/name-availability', schoolNameAvailabilityRateLimit, checkSchoolNameAvailabilityController);
 schoolsRouter.get('/current', authenticate, authorize(
   'SCHOOL_ADMIN',
   'HEADTEACHER',

@@ -81,6 +81,10 @@ export async function updateTermStatusController(req, res) {
     return validationError(res, parsed.error);
   }
 
+  if (parsed.data.status === 'FINALIZED' && req.user.role !== 'HEADTEACHER') {
+    return res.status(403).json({ success: false, error: { code: 'TERM_APPROVAL_FORBIDDEN', message: 'Only the headteacher can approve and finalize term results.' } });
+  }
+
   const data = await updateTermStatus(
     req.params.id,
     parsed.data.status,

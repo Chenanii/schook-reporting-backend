@@ -22,6 +22,17 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
 }
 
+export async function checkSchoolNameAvailability(name) {
+  const slug = slugify(name.trim());
+  if (!slug) return { available: false, slug: '', message: 'Enter a school name that can form a workspace URL.' };
+  const existing = await prisma.school.findUnique({ where: { slug }, select: { id: true } });
+  return {
+    available: !existing,
+    slug,
+    message: existing ? 'This school name is already in use. Try a different name.' : 'This school name is available.'
+  };
+}
+
 export async function listPublicPlans() {
   return prisma.subscriptionPlan.findMany({
     where: { isActive: true },

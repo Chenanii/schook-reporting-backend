@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { assertTermSubscriptionPaid } from '../../lib/term-payment-access.js';
 import { getReportCardDetails } from './report-card-details.service.js';
 import { getGradeScaleForClassLevel } from '../grade-scales/class-level-grade-scale.js';
 import { shouldIncludeReportSubject } from '../class-subjects/subject-requirements.js';
@@ -258,7 +259,31 @@ export async function getClassGroupReportCards({ termId, classGroupId, schoolId,
 
 export async function getEndOfTermReportPublication({ termId, classGroupId, schoolId }) { return publicationFor(termId, classGroupId, schoolId); }
 
+export async function hasFinalExamResultsStarted({ termId, classGroupId, schoolId }) {
+  const result = await prisma.assessmentResult.findFirst({
+    where: {
+      schoolId,
+      enrollment: { is: { termId, classGroupId } },
+      assessment: { is: { termId, assessmentType: 'FINAL_EXAM', status: { not: 'LOCKED' } } },
+      OR: [
+        { status: { not: 'NOT_ENTERED' } },
+        { mark: { not: null } },
+        { enteredAt: { not: null } },
+      ],
+    },
+    select: { id: true },
+  });
+  return Boolean(result);
+}
+
 export async function publishClassGroupEndOfTermReports({ termId, classGroupId, schoolId, actorId, req }) {
+  const term = await prisma.term.findFirst({ where: { id: termId, schoolId }, select: { status: true } });
+  if (!term) throw httpError(404, 'TERM_NOT_FOUND', 'Term not found.');
+  if (term.status !== 'FINALIZED') throw httpError(409, 'TERM_NOT_APPROVED', 'The headteacher must finalize this term before the school administrator can publish results.');
+  await assertTermSubscriptionPaid(schoolId, termId);
+  if (await hasFinalExamResultsStarted({ termId, classGroupId, schoolId })) {
+    throw httpError(409, 'FINAL_EXAM_RESULTS_STARTED', 'Final exam results are being entered or are awaiting lock for this class. Publishing reports is disabled until mark entry is complete and the exam is locked.');
+  }
   const cards = await getClassGroupReportCards({ termId, classGroupId, schoolId, allowIncomplete: true });
   if (!cards.length) throw httpError(409, 'REPORT_NO_ACTIVE_STUDENTS', 'There are no active student enrollments to publish for this class and term.');
   ensureResultsReady(cards);

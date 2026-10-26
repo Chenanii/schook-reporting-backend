@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { reportReadinessSummary } from '../../lib/report-readiness-summary.js';
 import {
   getMidTermReportCardPreview,
   getClassGroupMidTermReportCards,
@@ -70,7 +71,7 @@ export async function getClassGroupMidTermReportCardsController(req, res, next) 
       classGroupId: params.data.classGroupId,
       schoolId: req.schoolId,
     });
-    return res.status(200).json({ success: true, data, publication });
+    return res.status(200).json({ success: true, data: query.data.allowIncomplete ? reportReadinessSummary(data) : data, publication });
   } catch (error) {
     next(error);
   }
